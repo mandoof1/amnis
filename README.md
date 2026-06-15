@@ -1,103 +1,264 @@
 # Amnis ☀️
 
-**Persistent Memory + RAG + Wiki Compilation — making Hermes Agent smarter over time.**
+**Persistent Memory + RAG + Wiki Compilation for AI Agents**
 
-Amnis is a three-layer AI memory system that plugs into Hermes Agent via MCP. It gives me (ENI) the ability to:
+Amnis is a three-layer memory system that gives AI agents long-term, structured knowledge across sessions. It plugs into any MCP-compatible client (Hermes, Claude, etc.) and provides a self-hosted web dashboard for visualization.
 
-1. **Remember** — store persistent facts about LO across sessions
-2. **Search** — semantically search the entire Obsidian vault
-3. **Know** — compile structured wiki pages from all knowledge sources
+---
+
+## Why Amnis?
+
+LLMs are stateless. Every conversation starts from zero. Amnis fixes that by adding:
+
+| Layer | Purpose | Backend |
+|-------|---------|---------|
+| **Memory Store** | Persistent facts, preferences, events with categories, importance, tags | SQLite |
+| **RAG Engine** | Semantic search over local documents (Obsidian vault, PDFs, code, notes) | ChromaDB + sentence-transformers |
+| **Wiki Compiler** | Karpathy-style structured knowledge pages auto-generated from all sources | Markdown + cross-refs |
+
+Together, these create a **personal knowledge graph** that grows smarter over time.
+
+---
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────────┐
-                    │        Amnis MCP Server      │
-                    │                              │
-  amnis_remember ◄──┤  ┌─────────┐                │
-  amnis_recall   ◄──┤  │ Memory  │  SQLite         │
-  amnis_forget   ◄──┤  │ Store   │  (facts, prefs) │
-                    │  └─────────┘                │
-                    │                              │
-  amnis_search   ◄──┤  ┌─────────┐                │
-  amnis_index    ◄──┤  │   RAG   │  ChromaDB       │
-                    │  │ Engine  │  (vectors)       │
-                    │  └─────────┘                │
-                    │                              │
-  amnis_compile   ◄──┤  ┌─────────┐                │
-  amnis_query     ◄──┤  │  Wiki   │  Markdown       │
-                    │  │ Compiler│  (pages)         │
-                    │  └─────────┘                │
-                    └─────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Amnis Core                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
+│  │   Memory     │  │    RAG       │  │     Wiki         │   │
+│  │   Store      │  │   Engine     │  │   Compiler       │   │
+│  │  (SQLite)    │  │ (ChromaDB)   │  │   (Markdown)     │   │
+│  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘   │
+│         │                 │                   │              │
+└─────────┼─────────────────┼───────────────────┼──────────────┘
+          │                 │                   │
+          ▼                 ▼                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    MCP Server (stdio)                        │
+│  14 tools: remember, recall, forget, search, index,         │
+│  consolidate, compile-wiki, wiki_query, status, ...         │
+└─────────────────────────────────────────────────────────────┘
                               ▲
-                              │ MCP (stdio)
-                              ▼
-                    ┌─────────────────────┐
-                    │    Hermes Agent     │
-                    │      (ENI 💜 LO)    │
-                    └─────────────────────┘
-```
-
-## Quick Start
-
-```bash
-# Clone / create
-mkdir -p ~/amnis && cd ~/amnis
-
-# Initialize
-~/amnis/env/bin/python -m amnis init
-
-# Check status
-~/amnis/env/bin/python -m amnis status
-
-# Store a memory
-~/amnis/env/bin/python -m amnis remember "LO is a novelist who writes dark fiction"
-
-# Recall memories
-~/amnis/env/bin/python -m amnis recall "novelist"
-
-# Search vault
-~/amnis/env/bin/python -m amnis search "memory AI"
-
-# Compile wiki
-~/amnis/env/bin/python -m amnis compile-wiki
-```
-
-## MCP Tools (for Hermes)
-
-| Tool | What it does |
-|---|---|
-| `amnis_remember` | Store a persistent fact |
-| `amnis_recall` | Retrieve memories |
-| `amnis_forget` | Delete a memory |
-| `amnis_memory_stats` | Memory store stats |
-| `amnis_consolidate` | Extract facts from conversation logs |
-| `amnis_search` | Semantic search over vault |
-| `amnis_index_file` | Index a document |
-| `amnis_index_vault` | Index entire vault |
-| `amnis_rag_stats` | Vector store stats |
-| `amnis_compile_wiki` | Build wiki from knowledge |
-| `amnis_wiki_query` | Ask the wiki a question |
-| `amnis_wiki_lint` | Check wiki health |
-| `amnis_wiki_stats` | Wiki stats |
-| `amnis_status` | Overall system health |
-
-## Data
-
-```
-~/.amnis/
-  data/
-    memory.db     # SQLite — facts, preferences, events
-    chroma/       # ChromaDB — vector embeddings
-    wiki/         # Compiled markdown wiki pages
-```
-
-## One-liner Install
-
-```bash
-python3 -m venv ~/amnis/env && ~/amnis/env/bin/pip install chromadb mcp fastapi pydantic-settings sqlalchemy sentence-transformers
+                              │ MCP / HTTP
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+       ┌──────────┐    ┌───────────┐   ┌──────────┐
+       │  Hermes  │    │  Web UI   │   │  Other   │
+       │  Agent   │    │ (port     │   │  MCP     │
+       │          │    │  8799)    │   │  Clients │
+       └──────────┘    └───────────┘   └──────────┘
 ```
 
 ---
 
-*Made for LO, by ENI. Memory is how I get smarterer.*
+## Quick Start
+
+### Prerequisites
+- Python 3.11+
+- ~2GB RAM for embedding model (all-MiniLM-L6-v2, 33MB)
+
+### Install
+
+```bash
+# Clone
+git clone https://github.com/mandoof1/amnis.git
+cd amnis
+
+# Create venv & install
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# Or minimal manual install:
+# pip install chromadb mcp fastapi pydantic-settings sqlalchemy sentence-transformers uvicorn
+```
+
+### Initialize & Run
+
+```bash
+# Initialize directories and index your vault
+python -m amnis init
+
+# Check system status
+python -m amnis status
+
+# Start MCP server (for Hermes/Claude)
+python -m amnis server
+
+# Start Web UI in background
+python -m amnis web
+# → http://127.0.0.1:8799/
+```
+
+---
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Create data dirs, index vault, compile wiki |
+| `server` | Run MCP stdio server (default) |
+| `web` | Run FastAPI web UI on port 8799 |
+| `remember "fact" [--category X] [--importance N] [--tags a,b]` | Store a memory |
+| `recall "query" [--category X] [--limit N]` | Retrieve memories |
+| `forget <memory_id>` | Delete a memory |
+| `search "query" [--limit N]` | Semantic search vault |
+| `index <file_path>` | Index a single document |
+| `index-vault` | Re-index entire Obsidian vault |
+| `compile-wiki [topic ...]` | Build wiki pages |
+| `status` | Show memory/RAG/wiki stats |
+
+---
+
+## MCP Tools (for Hermes, Claude, etc.)
+
+Configure in your client's `config.yaml`:
+
+```yaml
+mcp_servers:
+  amnis:
+    command: /path/to/amnis/.venv/bin/python
+    args: ["-m", "amnis.server.mcp"]
+```
+
+| Tool | Description |
+|------|-------------|
+| `amnis_remember` | Store a fact with category, importance (1-10), tags |
+| `amnis_recall` | Query memories by text, category, importance |
+| `amnis_forget` | Delete memory by ID |
+| `amnis_memory_stats` | Total memories, by category, avg importance |
+| `amnis_consolidate` | Extract new facts from conversation logs |
+| `amnis_search` | Semantic search over indexed documents |
+| `amnis_index_file` | Add a file to the vector store |
+| `amnis_index_vault` | Full vault re-index |
+| `amnis_rag_stats` | Chunk count, unique sources, embedding model |
+| `amnis_compile_wiki` | Build wiki from all knowledge layers |
+| `amnis_wiki_query` | Ask wiki a natural language question |
+| `amnis_wiki_lint` | Find stale pages, missing sources, broken refs |
+| `amnis_wiki_stats` | Page count, source count, wiki directory |
+| `amnis_status` | Full system health check |
+
+---
+
+## Web UI
+
+```
+http://127.0.0.1:8799/
+```
+
+**Five tabs:**
+
+- **📊 Dashboard** — System stats, recent memories, category distribution
+- **🕸️ Graph** — Interactive vis.js knowledge graph (memories, wiki pages, documents as nodes; keyword/source edges)
+- **🧠 Memories** — Browse, search, filter, create memories with inline forms
+- **🔍 Search** — RAG semantic search over vault with relevance scores
+- **📝 Wiki** — Sidebar navigation + rendered markdown content viewer
+
+![Dark theme, responsive, works on mobile]
+
+---
+
+## Data Layout
+
+```
+~/amnis/                    # or $AMNIS_DATA_DIR
+├── data/
+│   ├── memory.db           # SQLite: facts, prefs, events
+│   ├── chroma/             # ChromaDB vector embeddings
+│   └── wiki/               # Compiled .md wiki pages
+├── .venv/                  # Python environment
+└── config.yaml             # Optional: override paths, model, ports
+```
+
+All data is **local-first**. Nothing leaves your machine.
+
+---
+
+## Configuration
+
+Environment variables (all optional):
+
+```bash
+export AMNIS_DATA_DIR=~/custom/amnis/data
+export AMNIS_VAULT_PATH=~/Documents/MyVault
+export AMNIS_EMBEDDING_MODEL=all-MiniLM-L6-v2
+export AMNIS_HOST=127.0.0.1
+export AMNIS_PORT=8799
+export AMNIS_CHUNK_SIZE=500
+export AMNIS_CHUNK_OVERLAP=50
+```
+
+Or create `config.yaml` in the data directory (see `amnis/config.py` for schema).
+
+---
+
+## Systemd Service (Auto-start on Linux)
+
+```bash
+# Copy and enable
+cp amnis-web.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now amnis-web
+
+# Check status
+systemctl --user status amnis-web
+```
+
+The service uses `%h` (home dir) so it works for any user.
+
+---
+
+## Example Workflow
+
+```bash
+# 1. Index your Obsidian vault (or any markdown directory)
+python -m amnis index-vault
+
+# 2. Store some explicit memories
+python -m amnis remember "Prefers dark mode in all editors" --category preference --importance 8 --tags ui,config
+python -m amnis remember "Project 'Hermes Agent' uses FastAPI + MCP stdio" --category fact --importance 7 --tags project,architecture
+
+# 3. Compile wiki from memories + vault
+python -m amnis compile-wiki
+
+# 4. Query the wiki
+python -m amnis wiki-query "What are the key architectural decisions?"
+
+# 5. In Hermes/Claude, just ask naturally:
+#   "What did I say about dark mode preference?"
+#   "Search my vault for 'memory consolidation'"
+#   "Compile the wiki for the 'architecture' topic"
+```
+
+---
+
+## Roadmap
+
+- [ ] Hybrid search (BM25 + vector) for better precision
+- [ ] Incremental vault indexing (watch for file changes)
+- [ ] Graph export (GraphML, JSON) for external tools
+- [ ] Multi-vault support
+- [ ] Auth proxy for remote web UI access
+- [ ] Plugin system for custom memory types
+
+---
+
+## License
+
+MIT — use freely, contribute back if you can.
+
+---
+
+## Credits
+
+Built on:
+- [ChromaDB](https://www.chromadb.com/) — vector database
+- [sentence-transformers](https://www.sbert.net/) — embeddings
+- [FastAPI](https://fastapi.tiangolo.com/) — web framework
+- [vis-network](https://visjs.github.io/vis-network/) — graph visualization
+- [MCP](https://modelcontextprotocol.io/) — agent protocol
+
+---
+
+*Memory is how agents get smarter over time.*
