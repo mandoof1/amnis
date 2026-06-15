@@ -33,7 +33,7 @@ class AmnisConfig(BaseSettings):
 
     # Wiki
     wiki_max_pages: int = 100
-    wiki_max_tokens: int = 400_000
+    wiki_max_tokens: int = 200_000
 
     # Server
     host: str = "127.0.0.1"
