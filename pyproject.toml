@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "amnis"
+version = "0.1.0"
+description = "Persistent Memory + RAG + Wiki Compilation for AI Agents (MCP)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["memory", "rag", "knowledge-graph", "mcp", "obsidian", "ai-agent"]
+
+authors = [
+    {name = "ENI & LO"},
+]
+
+dependencies = [
+    "chromadb>=1.5",
+    "mcp>=1.0",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pydantic-settings>=2.0",
+    "sqlalchemy>=2.0",
+    "sentence-transformers>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+]
+
+[project.urls]
+Homepage = "https://github.com/flexingmeowman/amnis"
+Repository = "https://github.com/flexingmeowman/amnis"

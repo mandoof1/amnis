@@ -1,0 +1,33 @@
+# Amnis — .gitignore
+
+# Data (personal memories, knowledge base, vector store)
+data/
+*.db
+*.sqlite3
+chroma/
+
+# Virtual environment
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Systemd user service (user-specific paths)
+amnis-web.service
+
+# Test files (personal test data)
+test_amnis.py
+test_mcp.py

@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amnis — Memory Graph</title>
+<script src="https://unpkg.com/vis-network@9.1.6/dist/vis-network.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.6/styles/vis-network.min.css">
+<style>
+  :root {
+    --bg: #0f0f14;
+    --surface: #1a1a24;
+    --surface2: #24243a;
+    --border: #2d2d44;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --accent: #8b5cf6;
+    --accent2: #10b981;
+    --accent3: #f59e0b;
+    --red: #ef4444;
+    --radius: 8px;
+    --shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ─── Layout ─── */
+  #app { display: flex; flex-direction: column; height: 100vh; }
+
+  /* ─── Header ─── */
+  header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    -webkit-app-region: drag;
+  }
+  header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
+  header .subtitle { font-size: 12px; color: var(--text2); margin-left: 4px; }
+  nav { display: flex; gap: 2px; margin-left: auto; -webkit-app-region: no-drag; }
+  nav button {
+    background: none; border: none; color: var(--text2); padding: 6px 14px;
+    font-size: 13px; cursor: pointer; border-radius: var(--radius);
+    transition: all 0.15s; font-family: inherit;
+  }
+  nav button:hover { background: var(--surface2); color: var(--text); }
+  nav button.active { background: var(--accent); color: white; }
+
+  /* ─── Main Content ─── */
+  main { flex: 1; display: flex; overflow: hidden; }
+  .tab-content { display: none; flex: 1; padding: 16px; overflow-y: auto; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* ─── Dashboard ─── */
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+    box-shadow: var(--shadow);
+  }
+  .stat-card .value { font-size: 28px; font-weight: 700; }
+  .stat-card .label { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .stat-card .sub { font-size: 11px; color: var(--text2); margin-top: 8px; }
+  .stat-card.memory .value { color: var(--accent2); }
+  .stat-card.rag .value { color: #0ea5e9; }
+  .stat-card.wiki .value { color: var(--accent); }
+
+  .activity-section { display: flex; gap: 16px; flex-wrap: wrap; }
+  .activity-section > div { flex: 1; min-width: 280px; }
+  .section-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+
+  .memory-list { list-style: none; }
+  .memory-list li {
+    padding: 8px 10px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; margin-bottom: 4px; font-size: 12px; cursor: pointer;
+    transition: all 0.1s; display: flex; align-items: center; gap: 8px;
+  }
+  .memory-list li:hover { border-color: var(--accent); background: var(--surface2); }
+  .memory-list .cat-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    font-size: 9px; font-weight: 600; text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .memory-list .fact-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .memory-list .importance { font-size: 10px; color: var(--text2); flex-shrink: 0; }
+
+  /* ─── Graph ─── */
+  #graph-container {
+    flex: 1; background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    position: relative; overflow: hidden;
+  }
+  #graph-controls {
+    position: absolute; top: 10px; right: 10px; z-index: 10;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  #graph-controls button {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
+    transition: all 0.1s;
+  }
+  #graph-controls button:hover { background: var(--surface2); border-color: var(--accent); }
+  #graph-legend {
+    position: absolute; bottom: 10px; left: 10px; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 12px; font-size: 11px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .legend-box { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .legend-square { width: 10px; height: 10px; flex-shrink: 0; }
+
+  /* ─── Memories Tab ─── */
+  .memories-toolbar {
+    display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .memories-toolbar input, .memories-toolbar select {
+    background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    font-family: inherit;
+  }
+  .memories-toolbar input { flex: 1; min-width: 150px; }
+  .memories-toolbar input:focus { outline: none; border-color: var(--accent); }
+  .memories-toolbar button {
+    background: var(--accent); border: none; color: white; padding: 6px 14px;
+    border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .memories-toolbar button:hover { opacity: 0.85; }
+
+  #memories-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  .memory-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; cursor: pointer; transition: all 0.15s;
+  }
+  .memory-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .memory-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .memory-card .card-fact { font-size: 13px; line-height: 1.4; }
+  .memory-card .card-meta { font-size: 11px; color: var(--text2); margin-top: 6px; }
+  .memory-card .card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .memory-card .card-tags span {
+    background: var(--surface2); padding: 1px 6px; border-radius: 3px;
+    font-size: 10px; color: var(--text2);
+  }
+
+  /* ─── Search Tab ─── */
+  .search-box {
+    display: flex; gap: 8px; margin-bottom: 12px;
+  }
+  .search-box input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 8px 12px; border-radius: 4px; font-size: 14px; font-family: inherit;
+  }
+  .search-box input:focus { outline: none; border-color: var(--accent); }
+  .search-box button {
+    background: var(--accent); border: none; color: white; padding: 8px 20px;
+    border-radius: 4px; cursor: pointer; font-size: 14px; font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .search-box button:hover { opacity: 0.85; }
+
+  #search-results { display: flex; flex-direction: column; gap: 8px; }
+  .search-result {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px;
+  }
+  .search-result .result-source { font-size: 11px; color: var(--text2); margin-bottom: 4px; word-break: break-all; }
+  .search-result .result-content { font-size: 13px; line-height: 1.5; }
+  .search-result .result-score { font-size: 11px; color: var(--accent2); margin-top: 4px; }
+
+  /* ─── Wiki Tab ─── */
+  .wiki-layout { display: flex; gap: 16px; height: 100%; }
+  .wiki-sidebar { width: 260px; flex-shrink: 0; overflow-y: auto; }
+  .wiki-sidebar input {
+    width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    padding: 8px; border-radius: 4px; font-size: 13px; margin-bottom: 8px; font-family: inherit;
+  }
+  .wiki-sidebar input:focus { outline: none; border-color: var(--accent); }
+  .wiki-page-list { list-style: none; }
+  .wiki-page-list li {
+    padding: 8px 10px; font-size: 13px; cursor: pointer; border-radius: 4px;
+    transition: all 0.1s; border-left: 3px solid transparent;
+  }
+  .wiki-page-list li:hover { background: var(--surface); border-left-color: var(--accent); }
+  .wiki-page-list li.active { background: var(--surface); border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .wiki-page-list li .page-summary { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+  .wiki-content {
+    flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px;
+  }
+  .wiki-content h1 { font-size: 22px; margin-bottom: 12px; color: var(--accent); }
+  .wiki-content h2 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
+  .wiki-content p { font-size: 13px; line-height: 1.6; margin-bottom: 8px; color: var(--text2); }
+  .wiki-content blockquote { border-left: 3px solid var(--accent); padding: 8px 12px; margin: 8px 0; background: var(--surface2); font-size: 12px; color: var(--text2); border-radius: 0 4px 4px 0; }
+  .wiki-content ul { font-size: 13px; color: var(--text2); padding-left: 20px; line-height: 1.6; }
+  .wiki-content code { background: var(--surface2); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .wiki-content a { color: var(--accent); text-decoration: none; }
+  .wiki-content a:hover { text-decoration: underline; }
+
+  .wiki-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--text2); gap: 8px;
+  }
+  .wiki-empty .icon { font-size: 40px; }
+  .wiki-empty .text { font-size: 14px; }
+
+  /* ─── New Memory Modal ─── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal h2 { font-size: 16px; margin-bottom: 16px; }
+  .modal label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; margin-top: 12px; }
+  .modal input, .modal textarea, .modal select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 8px; border-radius: 4px; font-size: 13px; font-family: inherit;
+  }
+  .modal textarea { min-height: 80px; resize: vertical; }
+  .modal input:focus, .modal textarea:focus, .modal select:focus { outline: none; border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .modal-actions button {
+    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit;
+    transition: opacity 0.15s;
+  }
+  .modal-actions .btn-primary { background: var(--accent); border: none; color: white; }
+  .modal-actions .btn-secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
+  .modal-actions button:hover { opacity: 0.85; }
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--accent2); color: white; padding: 10px 16px;
+    border-radius: var(--radius); font-size: 13px; z-index: 200;
+    opacity: 0; transform: translateY(10px); transition: all 0.3s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+  @media (max-width: 768px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .wiki-layout { flex-direction: column; }
+    .wiki-sidebar { width: 100%; max-height: 200px; }
+    #memories-list { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>☀️ Amnis</h1>
+    <span class="subtitle">Memory Graph</span>
+    <nav>
+      <button class="active" data-tab="dashboard">📊 Dashboard</button>
+      <button data-tab="graph">🕸️ Graph</button>
+      <button data-tab="memories">🧠 Memories</button>
+      <button data-tab="search">🔍 Search</button>
+      <button data-tab="wiki">📝 Wiki</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Dashboard -->
+    <div id="tab-dashboard" class="tab-content active">
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card memory"><div class="value" id="stat-memories">—</div><div class="label">Memories</div><div class="sub" id="stat-mem-avg">avg importance: —</div></div>
+        <div class="stat-card rag"><div class="value" id="stat-chunks">—</div><div class="label">RAG Chunks</div><div class="sub" id="stat-sources">sources: —</div></div>
+        <div class="stat-card wiki"><div class="value" id="stat-wiki">—</div><div class="label">Wiki Pages</div><div class="sub" id="stat-embed">model: —</div></div>
+        <div class="stat-card" style="border-color:var(--accent2)"><div class="value" id="stat-mem-by-cat">—</div><div class="label">Categories</div><div class="sub" id="stat-vault">vault: —</div></div>
+      </div>
+      <div class="activity-section">
+        <div>
+          <div class="section-title">🕐 Recent Memories</div>
+          <ul class="memory-list" id="recent-memories"><li style="color:var(--text2)">Loading...</li></ul>
+        </div>
+        <div>
+          <div class="section-title">📊 Memory by Category</div>
+          <div id="category-chart" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;min-height:120px;">
+            <div style="color:var(--text2);font-size:12px;text-align:center;padding:20px;">Loading...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Graph -->
+    <div id="tab-graph" class="tab-content">
+      <div id="graph-container">
+        <div id="graph-controls">
+          <button onclick="fitGraph()">⊞ Fit</button>
+          <button onclick="resetGraph()">↺ Reset</button>
+          <button onclick="refreshGraph()">⟳ Refresh</button>
+        </div>
+        <div id="graph-legend">
+          <div class="legend-item"><span class="legend-dot" style="background:#10b981"></span> Memory</div>
+          <div class="legend-item"><span class="legend-box" style="background:#8b5cf6"></span> Wiki Page</div>
+          <div class="legend-item"><span class="legend-square" style="background:#0ea5e9"></span> Document</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memories -->
+    <div id="tab-memories" class="tab-content">
+      <div class="memories-toolbar">
+        <input type="text" id="mem-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')loadMemories()">
+        <select id="mem-category"><option value="">All Categories</option><option value="preference">Preference</option><option value="fact">Fact</option><option value="event">Event</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="meta">Meta</option></select>
+        <button onclick="loadMemories()">Search</button>
+        <button onclick="showNewMemoryModal()" style="background:var(--accent2)">+ New Memory</button>
+      </div>
+      <div id="memories-list"></div>
+    </div>
+
+    <!-- Search -->
+    <div id="tab-search" class="tab-content">
+      <div class="search-box">
+        <input type="text" id="rag-query" placeholder="Ask anything in the vault..." onkeydown="if(event.key==='Enter')doSearch()">
+        <button onclick="doSearch()">Search</button>
+      </div>
+      <div id="search-results"></div>
+    </div>
+
+    <!-- Wiki -->
+    <div id="tab-wiki" class="tab-content">
+      <div class="wiki-layout">
+        <div class="wiki-sidebar">
+          <input type="text" id="wiki-search" placeholder="Search wiki pages..." onkeydown="if(event.key==='Enter')loadWiki()">
+          <ul class="wiki-page-list" id="wiki-page-list"><li style="color:var(--text2);font-size:12px;">Loading...</li></ul>
+        </div>
+        <div class="wiki-content" id="wiki-content">
+          <div class="wiki-empty">
+            <div class="icon">📝</div>
+            <div class="text">Select a wiki page from the sidebar</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- New Memory Modal -->
+<div class="modal-overlay" id="new-memory-modal">
+  <div class="modal">
+    <h2>🧠 New Memory</h2>
+    <label>Fact</label>
+    <textarea id="modal-fact" placeholder="What do you want to remember?"></textarea>
+    <label>Category</label>
+    <select id="modal-category">
+      <option value="fact">Fact</option>
+      <option value="preference">Preference</option>
+      <option value="event">Event</option>
+      <option value="procedure">Procedure</option>
+      <option value="concept">Concept</option>
+      <option value="meta">Meta</option>
+      <option value="general">General</option>
+    </select>
+    <label>Importance (1-10)</label>
+    <input type="number" id="modal-importance" value="5" min="1" max="10">
+    <label>Tags (comma separated)</label>
+    <input type="text" id="modal-tags" placeholder="e.g. writing, linux, setup">
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeNewMemoryModal()">Cancel</button>
+      <button class="btn-primary" onclick="saveNewMemory()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── State ───
+let network = null;
+let graphData = { nodes: [], edges: [] };
+let currentTab = 'dashboard';
+
+// ─── Tab Navigation ───
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    currentTab = btn.dataset.tab;
+    if (currentTab === 'graph') setTimeout(initGraph, 100);
+    if (currentTab === 'dashboard') loadDashboard();
+    if (currentTab === 'memories') loadMemories();
+    if (currentTab === 'wiki') loadWiki();
+  });
+});
+
+// ─── Dashboard ───
+async function loadDashboard() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    document.getElementById('stat-memories').textContent = data.memory.total_memories;
+    document.getElementById('stat-mem-avg').textContent = `avg importance: ${data.memory.avg_importance}`;
+    document.getElementById('stat-chunks').textContent = data.rag.total_chunks || 0;
+    document.getElementById('stat-sources').textContent = `sources: ${data.rag.unique_sources || 0}`;
+    document.getElementById('stat-wiki').textContent = data.wiki.total_pages;
+    document.getElementById('stat-embed').textContent = `model: ${data.config.embedding_model}`;
+    document.getElementById('stat-mem-by-cat').textContent = Object.keys(data.memory.by_category || {}).length;
+    document.getElementById('stat-vault').textContent = `vault: ${data.config.vault.split('/').pop()}`;
+
+    // Recent memories
+    const memRes = await fetch('/api/memories?limit=8');
+    const memData = await memRes.json();
+    const list = document.getElementById('recent-memories');
+    list.innerHTML = '';
+    (memData.memories || []).forEach(m => {
+      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
+        <span class="fact-text">${m.fact}</span>
+        <span class="importance">⭐${m.importance}</span>`;
+      list.appendChild(li);
+    });
+
+    // Category chart
+    renderCategoryChart(data.memory.by_category || {});
+  } catch (e) {
+    document.getElementById('recent-memories').innerHTML = `<li style="color:var(--red)">Error loading: ${e.message}</li>`;
+  }
+}
+
+function renderCategoryChart(byCategory) {
+  const container = document.getElementById('category-chart');
+  const entries = Object.entries(byCategory);
+  if (!entries.length) {
+    container.innerHTML = '<div style="color:var(--text2);font-size:12px;text-align:center;padding:20px;">No memories yet</div>';
+    return;
+  }
+  const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+  const total = entries.reduce((s, e) => s + e[1], 0);
+  let bars = '<div style="display:flex;flex-direction:column;gap:6px;">';
+  for (const [cat, count] of entries) {
+    const pct = (count / total) * 100;
+    bars += `<div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">
+        <span>${cat}</span><span>${count}</span>
+      </div>
+      <div style="background:var(--bg);border-radius:4px;height:14px;overflow:hidden;">
+        <div style="background:${colors[cat]||'#94a3b8'};width:${pct}%;height:100%;border-radius:4px;"></div>
+      </div>
+    </div>`;
+  }
+  bars += '</div>';
+  container.innerHTML = bars;
+}
+
+// ─── Graph ───
+async function initGraph() {
+  const container = document.getElementById('graph-container');
+  if (!container) return;
+
+  // Destroy any existing network first (clean slate)
+  if (network) {
+    network.destroy();
+    network = null;
+  }
+  // Clear any leftover canvas
+  container.innerHTML = `<div id="graph-controls">
+    <button onclick="fitGraph()">⊞ Fit</button>
+    <button onclick="resetGraph()">↺ Reset</button>
+    <button onclick="refreshGraph()">⟳ Refresh</button>
+  </div>
+  <div id="graph-legend">
+    <div class="legend-item"><span class="legend-dot" style="background:#10b981"></span> Memory</div>
+    <div class="legend-item"><span class="legend-box" style="background:#8b5cf6"></span> Wiki Page</div>
+    <div class="legend-item"><span class="legend-square" style="background:#0ea5e9"></span> Document</div>
+  </div>`;
+
+  // Small delay to let container get dimensions after tab switch
+  await new Promise(r => setTimeout(r, 50));
+  await refreshGraph();
+}
+
+async function refreshGraph() {
+  try {
+    const res = await fetch('/api/graph');
+    graphData = await res.json();
+  } catch (e) {
+    showToast('Error loading graph: ' + e.message);
+    return;
+  }
+
+  if (!graphData.nodes || graphData.nodes.length === 0) {
+    document.getElementById('graph-container').innerHTML += '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text2);text-align:center;"><div style="font-size:40px;margin-bottom:8px;">🕸️</div><div>No graph data yet</div><div style="font-size:12px;margin-top:4px;">Add memories and index your vault to see connections</div></div>';
+    return;
+  }
+
+  const container = document.getElementById('graph-container');
+  const options = {
+    nodes: {
+      font: { size: 10, color: '#e2e8f0' },
+      borderWidth: 1,
+      borderWidthSelected: 2,
+    },
+    edges: {
+      smooth: { type: 'continuous' },
+      arrows: { to: { enabled: false } },
+    },
+    physics: {
+      solver: 'forceAtlas2Based',
+      forceAtlas2Based: {
+        gravitationalConstant: -40,
+        centralGravity: 0.005,
+        springLength: 150,
+        springConstant: 0.02,
+        damping: 0.4,
+      },
+      stabilization: { iterations: 100 },
+    },
+    interaction: {
+      hover: true,
+      tooltipDelay: 200,
+      zoomView: true,
+      dragView: true,
+    },
+    groups: {
+      memory: { shape: 'dot', color: '#10b981' },
+      wiki: { shape: 'box', color: '#8b5cf6', font: { color: '#e2e8f0' } },
+      document: { shape: 'square', color: '#0ea5e9' },
+    },
+  };
+
+  try {
+    network = new vis.Network(container, graphData, options);
+    network.on('click', function(params) {
+      if (params.nodes.length > 0) {
+        const nodeId = params.nodes[0];
+        const node = graphData.nodes.find(n => n.id === nodeId);
+        if (node && node.data) {
+          showToast(`${node.group}: ${node.data.fact || node.data.title || node.label}`);
+        }
+      }
+    });
+    network.on('stabilizationIterationsDone', function() {
+      network.fit();
+    });
+  } catch (e) {
+    showToast('Graph render error: ' + e.message);
+  }
+}
+
+function fitGraph() { if (network) network.fit(); }
+function resetGraph() { if (network) { network.setData(graphData); network.fit(); } }
+
+// ─── Memories ───
+async function loadMemories() {
+  const query = document.getElementById('mem-search').value;
+  const category = document.getElementById('mem-category').value;
+  let url = '/api/memories?limit=100';
+  if (query) url += '&query=' + encodeURIComponent(query);
+  if (category) url += '&category=' + encodeURIComponent(category);
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    const container = document.getElementById('memories-list');
+    container.innerHTML = '';
+    if (!data.memories || data.memories.length === 0) {
+      container.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">No memories found</div>';
+      return;
+    }
+    const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+    data.memories.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'memory-card';
+      card.innerHTML = `<div class="card-header">
+        <span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
+        <span style="font-size:11px;color:var(--text2)">⭐${m.importance} · ${m.timestamp?.slice(0,10)||''}</span>
+      </div>
+      <div class="card-fact">${m.fact}</div>
+      <div class="card-meta">source: ${m.source} · confidence: ${m.confidence}</div>
+      ${(m.tags?.length) ? `<div class="card-tags">${m.tags.map(t => `<span>#${t}</span>`).join('')}</div>` : ''}`;
+      container.appendChild(card);
+    });
+  } catch (e) {
+    document.getElementById('memories-list').innerHTML = `<div style="color:var(--red);padding:20px;">Error: ${e.message}</div>`;
+  }
+}
+
+// ─── New Memory Modal ───
+function showNewMemoryModal() {
+  document.getElementById('new-memory-modal').classList.add('open');
+}
+function closeNewMemoryModal() {
+  document.getElementById('new-memory-modal').classList.remove('open');
+}
+async function saveNewMemory() {
+  const fact = document.getElementById('modal-fact').value.trim();
+  if (!fact) { showToast('Please enter a fact'); return; }
+  const tags = document.getElementById('modal-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  try {
+    const res = await fetch('/api/memories', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        fact,
+        category: document.getElementById('modal-category').value,
+        importance: parseInt(document.getElementById('modal-importance').value) || 5,
+        tags,
+        source: 'web-ui',
+      })
+    });
+    const data = await res.json();
+    showToast('✅ Memory saved!');
+    closeNewMemoryModal();
+    document.getElementById('modal-fact').value = '';
+    document.getElementById('modal-tags').value = '';
+    loadMemories();
+    loadDashboard();
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+// ─── RAG Search ───
+async function doSearch() {
+  const query = document.getElementById('rag-query').value.trim();
+  if (!query) return;
+  try {
+    const res = await fetch('/api/search?query=' + encodeURIComponent(query) + '&limit=10');
+    const data = await res.json();
+    const container = document.getElementById('search-results');
+    container.innerHTML = '';
+    if (!data.results || data.results.length === 0) {
+      container.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">No results found</div>';
+      return;
+    }
+    data.results.forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'search-result';
+      div.innerHTML = `<div class="result-source">📄 ${r.source}</div>
+        <div class="result-content">${r.content}</div>
+        <div class="result-score">relevance: ${(r.score * 100).toFixed(0)}%</div>`;
+      container.appendChild(div);
+    });
+  } catch (e) {
+    document.getElementById('search-results').innerHTML = `<div style="color:var(--red);padding:20px;">Error: ${e.message}</div>`;
+  }
+}
+
+// ─── Wiki ───
+let wikiPages = [];
+async function loadWiki() {
+  const search = document.getElementById('wiki-search').value;
+  try {
+    const url = '/api/wiki' + (search ? '?search=' + encodeURIComponent(search) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    wikiPages = data.pages || [];
+    const list = document.getElementById('wiki-page-list');
+    list.innerHTML = '';
+    if (!wikiPages.length) {
+      list.innerHTML = '<li style="color:var(--text2);font-size:12px;">No wiki pages</li>';
+      return;
+    }
+    wikiPages.forEach(p => {
+      const li = document.createElement('li');
+      li.textContent = p.title;
+      li.dataset.id = p.id;
+      li.addEventListener('click', () => loadWikiPage(p.id));
+      list.appendChild(li);
+    });
+  } catch (e) {
+    document.getElementById('wiki-page-list').innerHTML = `<li style="color:var(--red);font-size:12px;">Error: ${e.message}</li>`;
+  }
+}
+
+async function loadWikiPage(pageId) {
+  document.querySelectorAll('.wiki-page-list li').forEach(li => li.classList.remove('active'));
+  const li = document.querySelector(`.wiki-page-list li[data-id="${pageId}"]`);
+  if (li) li.classList.add('active');
+
+  try {
+    const res = await fetch(`/api/wiki/${pageId}`);
+    const page = await res.json();
+    const container = document.getElementById('wiki-content');
+    // Render markdown-like content as HTML (simple conversion)
+    let html = page.content
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\[\[(.+?)\]\]/g, '<a href="#" onclick="loadWikiByTitle(\'$1\');return false;">$1</a>')
+      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+    container.innerHTML = `<p>${html}</p>`;
+  } catch (e) {
+    document.getElementById('wiki-content').innerHTML = `<div class="wiki-empty"><div class="icon">⚠️</div><div class="text">Error: ${e.message}</div></div>`;
+  }
+}
+
+async function loadWikiByTitle(title) {
+  const page = wikiPages.find(p => p.title.toLowerCase() === title.toLowerCase());
+  if (page) loadWikiPage(page.id);
+}
+
+// ─── Toast ───
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ─── Init ───
+loadDashboard();
+// Load graph on demand (when tab is clicked)
+</script>
+</body>
+</html>
