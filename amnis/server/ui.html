@@ -387,11 +387,297 @@
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<!-- Memory Detail Modal -->
+<div class="modal-overlay" id="memory-detail-modal">
+  <div class="modal" style="max-width: 600px;">
+    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">🧠 Memory Details</h2>
+      <button class="btn-secondary" onclick="closeMemoryDetailModal()" style="padding:4px 12px;font-size:12px;">✕ Close</button>
+    </div>
+    <div id="memory-detail-content"></div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn-secondary" onclick="closeMemoryDetailModal()">Close</button>
+      <button class="btn-secondary" id="memory-detail-source-btn" onclick="" style="display:none;background:#0ea5e9;border-color:#0ea5e9;">📖 View Wiki Source</button>
+      <button class="btn-primary" id="memory-detail-edit-btn" onclick="editMemoryFromDetail()">✏️ Edit</button>
+      <button class="btn-secondary" id="memory-detail-delete-btn" onclick="deleteMemoryFromDetail()" style="background:var(--red);border-color:var(--red);">🗑️ Delete</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── State ───
 let network = null;
 let graphData = { nodes: [], edges: [] };
 let currentTab = 'dashboard';
+let currentMemoryId = null; // For detail modal
+
+// ─── Memory Detail Modal ───
+function showMemoryDetailModal(memoryId) {
+  currentMemoryId = memoryId;
+  const modal = document.getElementById('memory-detail-modal');
+  const content = document.getElementById('memory-detail-content');
+  content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);">Loading...</div>';
+  modal.classList.add('open');
+  
+  fetch(`/api/memories/${memoryId}`)
+    .then(r => r.json())
+    .then(m => {
+      if (m.error || !m.id) {
+        content.innerHTML = `<div style="color:var(--red);padding:20px;">Memory not found</div>`;
+        return;
+      }
+      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+      const color = colors[m.category] || '#94a3b8';
+      
+      // Check if source looks like a wiki page or document
+      const source = m.source || '—';
+      const isWikiSource = source.includes('wiki') || source.includes('Wiki');
+      const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
+      
+      content.innerHTML = `
+        <div style="margin-bottom:16px;">
+          <span class="cat-badge" style="background:${color};font-size:11px;padding:2px 8px;">${m.category}</span>
+          <span style="margin-left:8px;font-size:12px;color:var(--text2)">⭐ Importance: ${m.importance}/10</span>
+        </div>
+        <div style="font-size:14px;line-height:1.6;margin-bottom:16px;white-space:pre-wrap;">${escapeHtml(m.fact)}</div>
+        <div style="font-size:11px;color:var(--text2);display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+          <span>📅 Created: ${m.timestamp ? new Date(m.timestamp).toLocaleString() : 'Unknown'}</span>
+          <span>📝 Source: ${escapeHtml(source)}</span>
+          <span>🎯 Confidence: ${m.confidence || '—'}</span>
+        </div>
+        ${m.tags && m.tags.length ? `
+          <div style="margin-bottom:12px;">
+            <strong style="font-size:11px;color:var(--text2);">Tags:</strong>
+            <div style="margin-top:4px;">${m.tags.map(t => `<span style="background:var(--surface2);padding:2px 8px;border-radius:3px;font-size:10px;color:var(--text2);margin-right:4px;display:inline-block;">#${escapeHtml(t)}</span>`).join('')}</div>
+          </div>
+        ` : ''}
+        ${m.context ? `
+          <div style="background:var(--bg);padding:12px;border-radius:4px;border:1px solid var(--border);font-size:12px;color:var(--text2);">
+            <strong>Context:</strong><br>${escapeHtml(m.context)}
+          </div>
+        ` : ''}
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
+          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
+            SQLite database → ~/amnis/data/memory.db
+          </div>
+        </div>
+      `;
+      
+      // Update source button visibility
+      const sourceBtn = document.getElementById('memory-detail-source-btn');
+      if (sourceBtn) {
+        if (isWikiSource || isDocSource) {
+          sourceBtn.style.display = 'inline-flex';
+          sourceBtn.onclick = () => openWikiSource(source);
+        } else {
+          sourceBtn.style.display = 'none';
+        }
+      }
+    })
+    .catch(e => {
+      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+    });
+}
+
+function openWikiSource(source) {
+  // Try to find matching wiki page
+  fetch('/api/wiki')
+    .then(r => r.json())
+    .then(data => {
+      const pages = data.pages || [];
+      // Try exact match first, then partial
+      let match = pages.find(p => p.title.toLowerCase() === source.toLowerCase());
+      if (!match) {
+        match = pages.find(p => p.title.toLowerCase().includes(source.toLowerCase()) || source.toLowerCase().includes(p.title.toLowerCase()));
+      }
+      // Also check sources array
+      if (!match) {
+        match = pages.find(p => (p.sources || []).some(s => s.includes(source) || source.includes(s)));
+      }
+      
+      if (match) {
+        loadWikiPage(match.id);
+        // Switch to wiki tab
+        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+        document.querySelector('nav button[data-tab="wiki"]').classList.add('active');
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-wiki').classList.add('active');
+        currentTab = 'wiki';
+        closeMemoryDetailModal();
+      } else {
+        showToast(`No wiki page found for source: ${source}`);
+      }
+    })
+    .catch(e => showToast('Error finding wiki source: ' + e.message));
+}
+
+function closeMemoryDetailModal() {
+  document.getElementById('memory-detail-modal').classList.remove('open');
+  currentMemoryId = null;
+}
+
+function editMemoryFromDetail() {
+  closeMemoryDetailModal();
+  if (currentMemoryId) {
+    // Fetch full memory and populate edit modal
+    fetch(`/api/memories/${currentMemoryId}`)
+      .then(r => r.json())
+      .then(m => {
+        if (m.id) {
+          document.getElementById('modal-fact').value = m.fact;
+          document.getElementById('modal-category').value = m.category;
+          document.getElementById('modal-importance').value = m.importance;
+          document.getElementById('modal-tags').value = (m.tags || []).join(', ');
+          // Store the ID for update
+          document.getElementById('new-memory-modal').dataset.editingId = m.id;
+          showNewMemoryModal();
+        }
+      });
+  }
+}
+
+async function deleteMemoryFromDetail() {
+  if (!currentMemoryId) return;
+  if (!confirm('Delete this memory?')) return;
+  try {
+    const res = await fetch(`/api/memories/${currentMemoryId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('🗑️ Memory deleted');
+      closeMemoryDetailModal();
+      loadDashboard();
+      loadMemories();
+      refreshGraph();
+    } else {
+      showToast('Error deleting memory');
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ─── Wiki Detail Modal ───
+function showWikiDetailModal(pageId) {
+  const modal = document.getElementById('memory-detail-modal');
+  const content = document.getElementById('memory-detail-content');
+  content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);">Loading wiki page...</div>';
+  modal.classList.add('open');
+  
+  fetch(`/api/wiki/${pageId}`)
+    .then(r => r.json())
+    .then(page => {
+      if (page.error || !page.id) {
+        content.innerHTML = `<div style="color:var(--red);padding:20px;">Wiki page not found</div>`;
+        return;
+      }
+      const sources = page.sources || [];
+      content.innerHTML = `
+        <div style="margin-bottom:16px;">
+          <span class="cat-badge" style="background:#8b5cf6;font-size:11px;padding:2px 8px;">Wiki Page</span>
+        </div>
+        <h3 style="margin-bottom:12px;color:var(--accent);">${escapeHtml(page.title)}</h3>
+        <div style="font-size:13px;line-height:1.6;margin-bottom:16px;max-height:300px;overflow-y:auto;white-space:pre-wrap;">${escapeHtml(page.content || 'No content')}</div>
+        ${sources.length ? `
+          <div style="margin-bottom:12px;">
+            <strong style="font-size:11px;color:var(--text2);">Sources (${sources.length}):</strong>
+            <div style="margin-top:4px;max-height:150px;overflow-y:auto;">
+              ${sources.map(s => `<div style="font-size:11px;color:var(--text2);font-family:monospace;background:var(--bg);padding:4px 8px;margin:2px 0;border-radius:3px;">${escapeHtml(s)}</div>`).join('')}
+            </div>
+          </div>
+        ` : ''}
+        ${page.related && page.related.length ? `
+          <div style="margin-bottom:12px;">
+            <strong style="font-size:11px;color:var(--text2);">Related:</strong>
+            <div style="margin-top:4px;">${page.related.map(r => `<span style="background:var(--surface2);padding:2px 8px;border-radius:3px;font-size:10px;color:var(--text2);margin-right:4px;display:inline-block;">${escapeHtml(r)}</span>`).join('')}</div>
+          </div>
+        ` : ''}
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
+          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
+            Wiki markdown → ~/amnis/data/wiki/${page.id}.md
+          </div>
+        </div>
+      `;
+      // Hide source button for wiki nodes
+      const sourceBtn = document.getElementById('memory-detail-source-btn');
+      if (sourceBtn) sourceBtn.style.display = 'none';
+    })
+    .catch(e => {
+      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+    });
+}
+
+// ─── Document Detail Modal ───
+function showDocumentDetailModal(docTitle, nodeData) {
+  const modal = document.getElementById('memory-detail-modal');
+  const content = document.getElementById('memory-detail-content');
+  modal.classList.add('open');
+  
+  // Use the source from nodeData if available, otherwise fall back to title
+  const sourcePath = (nodeData && nodeData.source) ? nodeData.source : docTitle;
+  
+  // Fetch all memories and filter by source (client-side since API query searches fact/content, not source)
+  fetch('/api/memories?limit=200')
+    .then(r => r.json())
+    .then(data => {
+      const memories = (data.memories || []).filter(m => 
+        m.source && (m.source === sourcePath || m.source.includes(sourcePath) || sourcePath.includes(m.source))
+      );
+      
+      content.innerHTML = `
+        <div style="margin-bottom:16px;">
+          <span class="cat-badge" style="background:#0ea5e9;font-size:11px;padding:2px 8px;">Document</span>
+        </div>
+        <h3 style="margin-bottom:12px;color:#0ea5e9;">${escapeHtml(docTitle)}</h3>
+        <div style="font-size:13px;line-height:1.6;margin-bottom:16px;color:var(--text2);">
+          This document has been indexed into the RAG vector store. 
+          ${memories.length ? `Found ${memories.length} extracted memories from this source.` : 'No specific memories extracted yet.'}
+        </div>
+        ${sourcePath ? `
+          <div style="margin-bottom:12px;">
+            <strong style="font-size:11px;color:var(--text2);">Source Path:</strong>
+            <div style="margin-top:4px;font-size:11px;color:var(--text2);font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
+              ${escapeHtml(sourcePath)}
+            </div>
+          </div>
+        ` : ''}
+        ${memories.length ? `
+          <div style="margin-bottom:12px;">
+            <strong style="font-size:11px;color:var(--text2);">Extracted Memories (${memories.length}):</strong>
+            <div style="margin-top:4px;max-height:250px;overflow-y:auto;">
+              ${memories.map(m => `
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px;margin:4px 0;font-size:12px;">
+                  <div style="display:flex;gap:8px;margin-bottom:4px;">
+                    <span class="cat-badge" style="background:${{preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'}[m.category]||'#94a3b8'}">${m.category}</span>
+                    <span style="font-size:10px;color:var(--text2)">⭐${m.importance}</span>
+                  </div>
+                  <div style="white-space:pre-wrap;color:var(--text);">${escapeHtml(m.fact.slice(0, 200))}${m.fact.length > 200 ? '...' : ''}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
+          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
+            ChromaDB vectors → ~/amnis/data/chroma/
+          </div>
+        </div>
+      `;
+      // Hide source button
+      const sourceBtn = document.getElementById('memory-detail-source-btn');
+      if (sourceBtn) sourceBtn.style.display = 'none';
+    })
+    .catch(e => {
+      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+    });
+}
 
 // ─── Tab Navigation ───
 document.querySelectorAll('nav button').forEach(btn => {
@@ -433,6 +719,9 @@ async function loadDashboard() {
       li.innerHTML = `<span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
         <span class="fact-text">${m.fact}</span>
         <span class="importance">⭐${m.importance}</span>`;
+      li.style.cursor = 'pointer';
+      li.addEventListener('click', () => showMemoryDetailModal(m.id));
+      li.title = 'Click to view details';
       list.appendChild(li);
     });
 
@@ -551,7 +840,21 @@ async function refreshGraph() {
         const nodeId = params.nodes[0];
         const node = graphData.nodes.find(n => n.id === nodeId);
         if (node && node.data) {
-          showToast(`${node.group}: ${node.data.fact || node.data.title || node.label}`);
+          // For memory nodes, open the memory detail modal
+          if (node.group === 'memory' && node.data.id) {
+            showMemoryDetailModal(node.data.id);
+          } 
+          // For wiki nodes, open wiki detail modal
+          else if (node.group === 'wiki' && node.data.id) {
+            showWikiDetailModal(node.data.id);
+          }
+          // For document nodes, open document detail modal
+          else if (node.group === 'document' && node.data.title) {
+            showDocumentDetailModal(node.data.title, node.data);
+          }
+          else {
+            showToast(`${node.group}: ${node.data.fact || node.data.title || node.label}`);
+          }
         }
       }
     });
@@ -586,13 +889,21 @@ async function loadMemories() {
     data.memories.forEach(m => {
       const card = document.createElement('div');
       card.className = 'memory-card';
+      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+      const source = m.source || '—';
+      const isWikiSource = source.includes('wiki') || source.includes('Wiki');
+      const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
       card.innerHTML = `<div class="card-header">
         <span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
         <span style="font-size:11px;color:var(--text2)">⭐${m.importance} · ${m.timestamp?.slice(0,10)||''}</span>
       </div>
       <div class="card-fact">${m.fact}</div>
-      <div class="card-meta">source: ${m.source} · confidence: ${m.confidence}</div>
-      ${(m.tags?.length) ? `<div class="card-tags">${m.tags.map(t => `<span>#${t}</span>`).join('')}</div>` : ''}`;
+      <div class="card-meta">source: ${source} · confidence: ${m.confidence}</div>
+      ${(m.tags?.length) ? `<div class="card-tags">${m.tags.map(t => `<span>#${t}</span>`).join('')}</div>` : ''}
+      ${(isWikiSource || isDocSource) ? `<div style="margin-top:8px;"><button class="btn-secondary" style="font-size:11px;padding:4px 10px;background:#0ea5e9;border-color:#0ea5e9;" onclick="event.stopPropagation();openWikiSource('${source.replace(/'/g, "\\'")}')">📖 View Wiki Source</button></div>` : ''}`;
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', () => showMemoryDetailModal(m.id));
+      card.title = 'Click to view details';
       container.appendChild(card);
     });
   } catch (e) {
@@ -606,30 +917,59 @@ function showNewMemoryModal() {
 }
 function closeNewMemoryModal() {
   document.getElementById('new-memory-modal').classList.remove('open');
+  delete document.getElementById('new-memory-modal').dataset.editingId;
 }
 async function saveNewMemory() {
   const fact = document.getElementById('modal-fact').value.trim();
   if (!fact) { showToast('Please enter a fact'); return; }
   const tags = document.getElementById('modal-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  
+  // Check if we're editing an existing memory
+  const editingId = document.getElementById('new-memory-modal').dataset.editingId;
+  const isEditing = !!editingId;
+  
   try {
-    const res = await fetch('/api/memories', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        fact,
-        category: document.getElementById('modal-category').value,
-        importance: parseInt(document.getElementById('modal-importance').value) || 5,
-        tags,
-        source: 'web-ui',
-      })
-    });
-    const data = await res.json();
-    showToast('✅ Memory saved!');
+    let res, data;
+    if (isEditing) {
+      // Update existing memory - delete and recreate (simpler than adding PATCH endpoint)
+      await fetch(`/api/memories/${editingId}`, { method: 'DELETE' });
+      res = await fetch('/api/memories', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          fact,
+          category: document.getElementById('modal-category').value,
+          importance: parseInt(document.getElementById('modal-importance').value) || 5,
+          tags,
+          source: 'web-ui',
+        })
+      });
+      data = await res.json();
+      showToast('✅ Memory updated!');
+    } else {
+      // Create new memory
+      res = await fetch('/api/memories', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          fact,
+          category: document.getElementById('modal-category').value,
+          importance: parseInt(document.getElementById('modal-importance').value) || 5,
+          tags,
+          source: 'web-ui',
+        })
+      });
+      data = await res.json();
+      showToast('✅ Memory saved!');
+    }
+    
     closeNewMemoryModal();
     document.getElementById('modal-fact').value = '';
     document.getElementById('modal-tags').value = '';
+    delete document.getElementById('new-memory-modal').dataset.editingId;
     loadMemories();
     loadDashboard();
+    refreshGraph();
   } catch (e) {
     showToast('Error: ' + e.message);
   }

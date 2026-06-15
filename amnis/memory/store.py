@@ -130,6 +130,18 @@ def forget(memory_id: str) -> bool:
         session.close()
 
 
+def get_by_id(memory_id: str) -> Optional[dict]:
+    """Get a single memory by ID."""
+    session = get_session()
+    try:
+        entry = session.query(MemoryFact).filter(MemoryFact.id == memory_id).first()
+        if entry:
+            return _fact_to_dict(entry)
+        return None
+    finally:
+        session.close()
+
+
 def clear_expired() -> int:
     """Remove all expired memories. Returns count deleted."""
     session = get_session()

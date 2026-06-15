@@ -102,6 +102,15 @@ async def api_delete_memory(memory_id: str):
     return {"deleted": True}
 
 
+@app.get("/api/memories/{memory_id}")
+async def api_get_memory(memory_id: str):
+    """Get a single memory by ID."""
+    memory = memory_store.get_by_id(memory_id)
+    if not memory:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return memory
+
+
 @app.get("/api/search")
 async def api_search(query: str = "", limit: int = 10):
     """RAG search over indexed documents."""
@@ -244,6 +253,7 @@ async def api_graph():
                         "size": 8,
                         "shape": "square",
                         "font": {"size": 9},
+                        "data": {"title": Path(src).stem, "source": src},
                     })
     except Exception:
         pass
