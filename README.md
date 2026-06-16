@@ -35,6 +35,79 @@ Together, these create a **personal knowledge graph** that grows smarter over ti
 
 ---
 
+## Research Foundation
+
+Amnis is built on published research across cognitive architectures, generative agents, information retrieval, and episodic memory. Every layer maps to a specific paper or finding.
+
+### CoALA Framework (Princeton 2023)
+
+The [Cognitive Architectures for Language Agents](https://arxiv.org/abs/2309.02427) paper defines four memory types for AI agents. Amnis implements all four as concrete backends:
+
+| CoALA Memory Type | Amnis Implementation | Backend |
+|---|---|---|
+| **Working Memory** — agent's scratchpad for current context | `amnis/memory/working.py` — ring buffer with push/get/pop/clear, JSON persistence, automatic eviction at 20 slots, `flush_to_episodic()` for persisting transient context | In-memory + JSON file |
+| **Episodic Memory** — autobiographical recall of past interactions | `amnis/memory/episodic.py` — timestamped event log with outcome tracking (success/failure/neutral), structured results, session-scoped queries, auto-pruning | SQLite (`conversation_logs`) |
+| **Semantic Memory** — facts, preferences, domain knowledge | `amnis/memory/store.py` + `amnis/rag/engine.py` — categorized facts with importance scoring (1–10), confidence tracking, tags, hybrid RAG search using Reciprocal Rank Fusion | SQLite (`memory_facts`) + ChromaDB + FTS5 |
+| **Procedural Memory** — how to act, workflows, tool selection | Wiki Compiler (`amnis/wiki/compiler.py`) — auto-generated structured knowledge pages cross-referenced across all three layers | Markdown wiki |
+
+### Generative Agents (Stanford 2023)
+
+The Stanford paper on [Generative Agents: Interactive Simulacra of Human Behavior](https://arxiv.org/abs/2304.03442) found that **removing reflection broke emergent behaviors** — agents stopped forming high-level beliefs from raw observations. Amnis implements a reflection hierarchy in `amnis/memory/consolidation.py`:
+
+```
+Raw observations → Embedding clustering (cosine >0.75) → Theme synthesis → Stored as `theme` facts
+```
+
+- Up to 5 theme clusters per consolidation run
+- Existing themes are reinforced (confidence +0.05, importance +1) rather than duplicated
+- Themes carry cross-references to source observations for full traceability
+
+### Episodic Memory (arXiv 2024)
+
+The [Episodic Memory is the Missing Piece for Long-Term LLM Agents](https://arxiv.org/abs/2502.06975) paper identifies five required properties for episodic memory. Amnis meets all five:
+
+| Property | Amnis Implementation |
+|---|---|
+| Long-term storage | SQLite persistence across sessions with configurable retention (default 180 days) |
+| Explicit reasoning | `amnis_episodic_recall` MCP tool returns structured episodes with summaries, topics, and outcome |
+| Single-shot learning | Each `log_episode()` call encodes a unique experience from one exposure |
+| Instance-specific content | Every episode captures full role + content + timestamp + outcome |
+| Contextual relations | Episodes are bound to `session_id`, ranked by importance, filterable by outcome |
+
+### Hybrid Search with RRF
+
+Amnis uses **Reciprocal Rank Fusion** (k=60) to blend semantic search (ChromaDB cosine similarity) with keyword search (SQLite FTS5 full-text search). This technique, widely cited in the RAG literature, ensures chunks must rank well in **both** methods to score highly:
+
+```
+rrf_score(chunk) = 1/(60 + rank_semantic) + 1/(60 + rank_keyword)
+```
+
+Combined with **heading-aware chunking** (respects H1–H6 boundaries, configurable via `chunk_size`/`chunk_overlap`/`heading_level`), this preserves document structure during ingestion — sections stay intact rather than being split mid-paragraph.
+
+### Memory Consolidation Pipeline
+
+Inspired by the Mem0/Letta agent memory frameworks and the Generative Agents consolidation process, Amnis runs a background pipeline at `amnis/memory/consolidation.py`:
+
+1. **Extract** — scan recent conversation logs, extract structured `MemoryFact` records with computed importance scores
+2. **Contradiction detection** — polarity scoring flags facts with opposite sentiment on the same topic, confidence is reduced on both
+3. **Semantic dedup** — cosine similarity >0.9 merges near-identical facts (longer/more specific version wins)
+4. **Reflect** — cluster observations into theme-level beliefs (Stanford finding)
+5. **Prune** — decay confidence by 0.98^days since last access, remove stale/low-importance/near-duplicate facts at `amnis/memory/pruning.py`
+
+### Disk Impact
+
+All of this runs in **~5.9 MB** for a typical setup (242 memories + 425 RAG chunks + 32 wiki pages). Zero new dependencies beyond ChromaDB, sentence-transformers, and SQLite.
+
+```
+Memory facts (SQLite)      ~100 KB / 1,000 facts
+Episodic logs (SQLite)      ~50 KB / 1,000 episodes
+ChromaDB vectors           ~2 MB / 500 chunks
+FTS5 keyword index         ~1 MB / 500 chunks
+Wiki pages (markdown)     ~200 KB / 50 pages
+```
+
+---
+
 ## Architecture
 
 ```
