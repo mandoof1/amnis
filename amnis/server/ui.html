@@ -4,279 +4,1274 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Amnis — Memory Graph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/vis-network@9.1.6/dist/vis-network.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/vis-network@9.1.6/styles/vis-network.min.css">
 <style>
+  /* ─── Design Tokens ─── */
   :root {
-    --bg: #0f0f14;
-    --surface: #1a1a24;
-    --surface2: #24243a;
-    --border: #2d2d44;
-    --text: #e2e8f0;
-    --text2: #94a3b8;
+    /* Surfaces — each step adds +2% lightness for depth */
+    --bg: #0c0c10;
+    --surface-1: #16161a;
+    --surface-2: #1e1e24;
+    --surface-3: #26262e;
+    --surface-hover: #2e2e36;
+
+    /* Borders — hierarchy of visual weight */
+    --border-subtle: #23232a;
+    --border-default: #2c2c35;
+    --border-strong: #383844;
+    --border-accent: #4c4c5c;
+
+    /* Ink — 4 levels of text emphasis */
+    --ink-primary: #f4f4f6;
+    --ink-secondary: #a1a1aa;
+    --ink-tertiary: #71717a;
+    --ink-placeholder: #52525b;
+
+    /* Brand palette */
     --accent: #8b5cf6;
-    --accent2: #10b981;
-    --accent3: #f59e0b;
+    --accent-hover: #a07aff;
+    --accent-muted: rgba(139, 92, 246, 0.12);
+    --accent-ring: rgba(139, 92, 246, 0.35);
+
+    --green: #22c55e;
+    --green-muted: rgba(34, 197, 94, 0.12);
+    --blue: #0ea5e9;
+    --blue-muted: rgba(14, 165, 233, 0.12);
+    --amber: #f59e0b;
+    --amber-muted: rgba(245, 158, 11, 0.12);
     --red: #ef4444;
-    --radius: 8px;
-    --shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    height: 100vh;
-    overflow: hidden;
+    --red-muted: rgba(239, 68, 68, 0.12);
+    --pink: #ec4899;
+    --gray: #6b7280;
+
+    /* Category colors (kept from original for data) */
+    --cat-preference: #f59e0b;
+    --cat-fact: #22c55e;
+    --cat-event: #3b82f6;
+    --cat-procedure: #8b5cf6;
+    --cat-concept: #ec4899;
+    --cat-meta: #6b7280;
+    --cat-general: #a1a1aa;
+
+    /* Typography - Inter with geometric fallback */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+
+    /* Modular type scale (minor third: 1.250) — base 14px */
+    --text-xs: 0.75rem;     /* 12px */
+    --text-sm: 0.8125rem;   /* 13px */
+    --text-base: 0.875rem;  /* 14px — body UI */
+    --text-md: 1rem;        /* 16px */
+    --text-lg: 1.25rem;     /* 20px */
+    --text-xl: 1.5rem;      /* 24px */
+    --text-2xl: 1.875rem;   /* 30px */
+    --text-3xl: 2.375rem;   /* 38px */
+
+    --leading-tight: 1.25;
+    --leading-snug: 1.375;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.625;
+
+    --tracking-tight: -0.01em;
+    --tracking-normal: 0;
+    --tracking-wide: 0.02em;
+
+    /* Spacing scale (8px grid with 4px micro step) */
+    --space-1: 0.25rem;   /* 4px */
+    --space-2: 0.5rem;    /* 8px */
+    --space-3: 0.75rem;   /* 12px */
+    --space-4: 1rem;      /* 16px */
+    --space-5: 1.25rem;   /* 20px */
+    --space-6: 1.5rem;    /* 24px */
+    --space-8: 2rem;      /* 32px */
+    --space-10: 2.5rem;   /* 40px */
+    --space-12: 3rem;     /* 48px */
+    --space-16: 4rem;     /* 64px */
+
+    /* Corner radius scale */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+
+    /* Shadow elevation — 3 layers of depth */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.2);
+    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.5);
+
+    /* Micro-interaction timing */
+    --duration-instant: 50ms;
+    --duration-fast: 100ms;
+    --duration-normal: 150ms;
+    --duration-slow: 250ms;
+    --duration-modal: 300ms;
+
+    /* Easing */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+    --ease-default: ease;
   }
 
-  /* ─── Layout ─── */
-  #app { display: flex; flex-direction: column; height: 100vh; }
+  /* ─── Reset ─── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ─── Base ─── */
+  body {
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    color: var(--ink-primary);
+    background: var(--bg);
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: var(--accent-muted);
+    color: var(--accent-hover);
+  }
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-accent); }
+
+  /* ─── App Shell ─── */
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
 
   /* ─── Header ─── */
   header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 12px 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border-default);
     -webkit-app-region: drag;
+    flex-shrink: 0;
+    z-index: 10;
   }
-  header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
-  header .subtitle { font-size: 12px; color: var(--text2); margin-left: 4px; }
-  nav { display: flex; gap: 2px; margin-left: auto; -webkit-app-region: no-drag; }
+
+  header .logo {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    -webkit-app-region: no-drag;
+  }
+
+  header h1 {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  header h1 .accent {
+    color: var(--accent);
+  }
+
+  header .subtitle {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    font-weight: 500;
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+
+  /* ─── Nav Tabs ─── */
+  nav {
+    display: flex;
+    gap: var(--space-1);
+    margin-left: auto;
+    -webkit-app-region: no-drag;
+  }
+
   nav button {
-    background: none; border: none; color: var(--text2); padding: 6px 14px;
-    font-size: 13px; cursor: pointer; border-radius: var(--radius);
-    transition: all 0.15s; font-family: inherit;
+    background: none;
+    border: none;
+    color: var(--ink-secondary);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: color var(--duration-fast) var(--ease-out),
+                background var(--duration-fast) var(--ease-out);
+    font-family: inherit;
+    letter-spacing: var(--tracking-normal);
+    position: relative;
   }
-  nav button:hover { background: var(--surface2); color: var(--text); }
-  nav button.active { background: var(--accent); color: white; }
+
+  nav button:hover {
+    color: var(--ink-primary);
+    background: var(--surface-hover);
+  }
+
+  nav button.active {
+    color: var(--accent);
+    background: var(--accent-muted);
+  }
+
+  nav button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
 
   /* ─── Main Content ─── */
-  main { flex: 1; display: flex; overflow: hidden; }
-  .tab-content { display: none; flex: 1; padding: 16px; overflow-y: auto; }
-  .tab-content.active { display: flex; flex-direction: column; }
+  main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
 
-  /* ─── Dashboard ─── */
+  .tab-content {
+    display: none;
+    flex: 1;
+    padding: var(--space-5);
+    overflow-y: auto;
+    animation: tabFadeIn var(--duration-slow) var(--ease-out);
+  }
+
+  .tab-content.active {
+    display: flex;
+    flex-direction: column;
+  }
+
+  @keyframes tabFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ─── Section Titles ─── */
+  .section-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--ink-secondary);
+    letter-spacing: var(--tracking-tight);
+    margin-bottom: var(--space-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* ─── Stat Cards ─── */
   .stats-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px; margin-bottom: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-6);
   }
+
   .stat-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 16px;
-    box-shadow: var(--shadow);
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    box-shadow: var(--shadow-sm);
+    transition: border-color var(--duration-normal) var(--ease-out),
+                box-shadow var(--duration-normal) var(--ease-out);
+    position: relative;
+    overflow: hidden;
   }
-  .stat-card .value { font-size: 28px; font-weight: 700; }
-  .stat-card .label { font-size: 12px; color: var(--text2); margin-top: 4px; }
-  .stat-card .sub { font-size: 11px; color: var(--text2); margin-top: 8px; }
-  .stat-card.memory .value { color: var(--accent2); }
-  .stat-card.rag .value { color: #0ea5e9; }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .stat-card.memory::before { background: var(--green); }
+  .stat-card.rag::before { background: var(--blue); }
+  .stat-card.wiki::before { background: var(--accent); }
+  .stat-card.categories::before { background: var(--amber); }
+
+  .stat-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+  }
+
+  .stat-card .stat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+  }
+
+  .stat-card .stat-label {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--ink-tertiary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+  }
+
+  .stat-card .stat-icon {
+    font-size: var(--text-md);
+    opacity: 0.5;
+  }
+
+  .stat-card .value {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .stat-card.memory .value { color: var(--green); }
+  .stat-card.rag .value { color: var(--blue); }
   .stat-card.wiki .value { color: var(--accent); }
+  .stat-card.categories .value { color: var(--amber); }
 
-  .activity-section { display: flex; gap: 16px; flex-wrap: wrap; }
-  .activity-section > div { flex: 1; min-width: 280px; }
-  .section-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+  .stat-card .sub {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    margin-top: var(--space-2);
+    line-height: var(--leading-relaxed);
+  }
 
-  .memory-list { list-style: none; }
+  /* ─── Activity Section ─── */
+  .activity-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-5);
+    flex: 1;
+    min-height: 0;
+  }
+
+  @media (max-width: 960px) {
+    .activity-section { grid-template-columns: 1fr; }
+  }
+
+  .activity-panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .activity-panel .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-3);
+  }
+
+  .activity-panel .panel-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--ink-primary);
+  }
+
+  .activity-panel .panel-badge {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    background: var(--surface-2);
+    padding: 2px var(--space-2);
+    border-radius: 10px;
+  }
+
+  /* ─── Memory List (Dashboard) ─── */
+  .memory-list {
+    list-style: none;
+    flex: 1;
+    overflow-y: auto;
+  }
+
   .memory-list li {
-    padding: 8px 10px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 4px; margin-bottom: 4px; font-size: 12px; cursor: pointer;
-    transition: all 0.1s; display: flex; align-items: center; gap: 8px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 3px;
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
   }
-  .memory-list li:hover { border-color: var(--accent); background: var(--surface2); }
-  .memory-list .cat-badge {
-    display: inline-block; padding: 1px 6px; border-radius: 3px;
-    font-size: 9px; font-weight: 600; text-transform: uppercase;
+
+  .memory-list li:hover {
+    border-color: var(--accent);
+    background: var(--surface-3);
+  }
+
+  .cat-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
     flex-shrink: 0;
+    line-height: 1.4;
   }
-  .memory-list .fact-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .memory-list .importance { font-size: 10px; color: var(--text2); flex-shrink: 0; }
+
+  .fact-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-primary);
+  }
+
+  .importance-chip {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Category Bar Chart ─── */
+  .category-chart {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .chart-bar-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .chart-bar-label {
+    font-size: var(--text-xs);
+    color: var(--ink-secondary);
+    width: 70px;
+    flex-shrink: 0;
+    text-transform: capitalize;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chart-bar-track {
+    flex: 1;
+    height: 10px;
+    background: var(--surface-2);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+
+  .chart-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width var(--duration-slow) var(--ease-out);
+  }
+
+  .chart-bar-count {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    width: 28px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Skeleton Loading ─── */
+  .skeleton {
+    background: linear-gradient(90deg,
+      var(--surface-2) 25%,
+      var(--surface-3) 50%,
+      var(--surface-2) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  .skeleton-text { height: 14px; width: 100%; margin-bottom: 8px; }
+  .skeleton-text.w40 { width: 40%; }
+  .skeleton-text.w60 { width: 60%; }
+  .skeleton-text.w80 { width: 80%; }
+  .skeleton-value { height: 36px; width: 50%; margin-bottom: 4px; }
+  .skeleton-badge { height: 14px; width: 50px; display: inline-block; }
+  .skeleton-block { height: 60px; width: 100%; }
+  .skeleton-card { height: 100px; border-radius: var(--radius-lg); }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
   /* ─── Graph ─── */
   #graph-container {
-    flex: 1; background: var(--bg);
-    border: 1px solid var(--border); border-radius: var(--radius);
-    position: relative; overflow: hidden;
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    position: relative;
+    overflow: hidden;
   }
+
   #graph-controls {
-    position: absolute; top: 10px; right: 10px; z-index: 10;
-    display: flex; flex-direction: column; gap: 4px;
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-3);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
   }
+
   #graph-controls button {
-    background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;
-    transition: all 0.1s;
-  }
-  #graph-controls button:hover { background: var(--surface2); border-color: var(--accent); }
-  #graph-legend {
-    position: absolute; bottom: 10px; left: 10px; z-index: 10;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 8px 12px; font-size: 11px;
-    display: flex; flex-direction: column; gap: 3px;
-  }
-  .legend-item { display: flex; align-items: center; gap: 6px; }
-  .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .legend-box { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-  .legend-square { width: 10px; height: 10px; flex-shrink: 0; }
-
-  /* ─── Memories Tab ─── */
-  .memories-toolbar {
-    display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
-  }
-  .memories-toolbar input, .memories-toolbar select {
-    background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-default);
+    color: var(--ink-secondary);
+    padding: var(--space-1) var(--space-2);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--text-xs);
     font-family: inherit;
+    transition: all var(--duration-fast) var(--ease-out);
   }
-  .memories-toolbar input { flex: 1; min-width: 150px; }
-  .memories-toolbar input:focus { outline: none; border-color: var(--accent); }
-  .memories-toolbar button {
-    background: var(--accent); border: none; color: white; padding: 6px 14px;
-    border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit;
-    transition: opacity 0.15s;
-  }
-  .memories-toolbar button:hover { opacity: 0.85; }
 
-  #memories-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  #graph-controls button:hover {
+    background: var(--surface-3);
+    color: var(--ink-primary);
+    border-color: var(--border-strong);
+  }
+
+  #graph-legend {
+    position: absolute;
+    bottom: var(--space-3);
+    left: var(--space-3);
+    z-index: 10;
+    background: var(--surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--ink-secondary);
+  }
+
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .legend-box { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .legend-square { width: 8px; height: 8px; flex-shrink: 0; border-radius: 1px; }
+
+  .graph-empty {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: var(--ink-tertiary);
+  }
+
+  .graph-empty .icon { font-size: 32px; margin-bottom: var(--space-2); }
+  .graph-empty .label { font-size: var(--text-base); margin-bottom: var(--space-1); }
+  .graph-empty .hint { font-size: var(--text-xs); color: var(--ink-tertiary); }
+
+  /* ─── Memories Toolbar ─── */
+  .memories-toolbar {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .memories-toolbar input,
+  .memories-toolbar select {
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--ink-primary);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+
+  .memories-toolbar input::placeholder { color: var(--ink-placeholder); }
+  .memories-toolbar input { flex: 1; min-width: 180px; }
+  .memories-toolbar input:focus,
+  .memories-toolbar select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .memories-toolbar select { cursor: pointer; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    border: 1px solid transparent;
+    white-space: nowrap;
+    line-height: var(--leading-tight);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .btn-secondary {
+    background: var(--surface-2);
+    border-color: var(--border-default);
+    color: var(--ink-primary);
+  }
+
+  .btn-secondary:hover {
+    background: var(--surface-3);
+    border-color: var(--border-strong);
+  }
+
+  .btn-success {
+    background: var(--green);
+    border-color: var(--green);
+    color: white;
+  }
+
+  .btn-danger {
+    background: var(--red);
+    border-color: var(--red);
+    color: white;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--ink-secondary);
+  }
+
+  .btn-ghost:hover {
+    background: var(--surface-hover);
+    color: var(--ink-primary);
+  }
+
+  .btn-sm {
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .btn-xs {
+    padding: 2px var(--space-2);
+    font-size: 11px;
+  }
+
+  /* ─── Memory Cards ─── */
+  #memories-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: var(--space-3);
+  }
+
   .memory-card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 12px; cursor: pointer; transition: all 0.15s;
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+    box-shadow: var(--shadow-sm);
   }
-  .memory-card:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .memory-card .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-  .memory-card .card-fact { font-size: 13px; line-height: 1.4; }
-  .memory-card .card-meta { font-size: 11px; color: var(--text2); margin-top: 6px; }
-  .memory-card .card-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+
+  .memory-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .memory-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-2);
+  }
+
+  .memory-card .card-fact {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--ink-primary);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .memory-card .card-meta {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    margin-top: var(--space-2);
+    line-height: var(--leading-relaxed);
+  }
+
+  .memory-card .card-tags {
+    display: flex;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+    margin-top: var(--space-2);
+  }
+
   .memory-card .card-tags span {
-    background: var(--surface2); padding: 1px 6px; border-radius: 3px;
-    font-size: 10px; color: var(--text2);
+    background: var(--surface-2);
+    padding: 1px var(--space-2);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--ink-tertiary);
   }
 
-  /* ─── Search Tab ─── */
+  .memory-card .card-actions {
+    margin-top: var(--space-2);
+    display: flex;
+    gap: var(--space-1);
+  }
+
+  /* ─── Search ─── */
   .search-box {
-    display: flex; gap: 8px; margin-bottom: 12px;
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
   }
+
   .search-box input {
-    flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 8px 12px; border-radius: 4px; font-size: 14px; font-family: inherit;
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--ink-primary);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
+    font-family: inherit;
+    transition: border-color var(--duration-fast) var(--ease-out);
   }
-  .search-box input:focus { outline: none; border-color: var(--accent); }
-  .search-box button {
-    background: var(--accent); border: none; color: white; padding: 8px 20px;
-    border-radius: 4px; cursor: pointer; font-size: 14px; font-family: inherit;
-    transition: opacity 0.15s;
-  }
-  .search-box button:hover { opacity: 0.85; }
 
-  #search-results { display: flex; flex-direction: column; gap: 8px; }
+  .search-box input::placeholder { color: var(--ink-placeholder); }
+  .search-box input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  #search-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
   .search-result {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 12px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4);
+    transition: border-color var(--duration-fast) var(--ease-out);
   }
-  .search-result .result-source { font-size: 11px; color: var(--text2); margin-bottom: 4px; word-break: break-all; }
-  .search-result .result-content { font-size: 13px; line-height: 1.5; }
-  .search-result .result-score { font-size: 11px; color: var(--accent2); margin-top: 4px; }
 
-  /* ─── Wiki Tab ─── */
-  .wiki-layout { display: flex; gap: 16px; height: 100%; }
-  .wiki-sidebar { width: 260px; flex-shrink: 0; overflow-y: auto; }
+  .search-result:hover {
+    border-color: var(--border-strong);
+  }
+
+  .search-result .result-source {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    margin-bottom: var(--space-1);
+    word-break: break-all;
+    font-family: var(--font-mono);
+  }
+
+  .search-result .result-content {
+    font-size: var(--text-sm);
+    line-height: var(--leading-relaxed);
+    color: var(--ink-primary);
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .search-result .result-score {
+    font-size: var(--text-xs);
+    color: var(--green);
+    margin-top: var(--space-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ─── Wiki ─── */
+  .wiki-layout {
+    display: flex;
+    gap: var(--space-4);
+    height: 100%;
+    min-height: 0;
+  }
+
+  .wiki-sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+  }
+
   .wiki-sidebar input {
-    width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-    padding: 8px; border-radius: 4px; font-size: 13px; margin-bottom: 8px; font-family: inherit;
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--ink-primary);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-3);
+    font-family: inherit;
+    transition: border-color var(--duration-fast) var(--ease-out);
   }
-  .wiki-sidebar input:focus { outline: none; border-color: var(--accent); }
+
+  .wiki-sidebar input::placeholder { color: var(--ink-placeholder); }
+  .wiki-sidebar input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
   .wiki-page-list { list-style: none; }
+
   .wiki-page-list li {
-    padding: 8px 10px; font-size: 13px; cursor: pointer; border-radius: 4px;
-    transition: all 0.1s; border-left: 3px solid transparent;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all var(--duration-fast) var(--ease-out);
+    border-left: 2px solid transparent;
+    color: var(--ink-secondary);
   }
-  .wiki-page-list li:hover { background: var(--surface); border-left-color: var(--accent); }
-  .wiki-page-list li.active { background: var(--surface); border-left-color: var(--accent); color: var(--accent); font-weight: 600; }
-  .wiki-page-list li .page-summary { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+  .wiki-page-list li:hover {
+    background: var(--surface-2);
+    color: var(--ink-primary);
+    border-left-color: var(--border-accent);
+  }
+
+  .wiki-page-list li.active {
+    background: var(--accent-muted);
+    color: var(--accent-hover);
+    border-left-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .wiki-page-list li .page-summary {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+    margin-top: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 
   .wiki-content {
-    flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
   }
-  .wiki-content h1 { font-size: 22px; margin-bottom: 12px; color: var(--accent); }
-  .wiki-content h2 { font-size: 16px; margin: 16px 0 8px; color: var(--text); }
-  .wiki-content p { font-size: 13px; line-height: 1.6; margin-bottom: 8px; color: var(--text2); }
-  .wiki-content blockquote { border-left: 3px solid var(--accent); padding: 8px 12px; margin: 8px 0; background: var(--surface2); font-size: 12px; color: var(--text2); border-radius: 0 4px 4px 0; }
-  .wiki-content ul { font-size: 13px; color: var(--text2); padding-left: 20px; line-height: 1.6; }
-  .wiki-content code { background: var(--surface2); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
-  .wiki-content a { color: var(--accent); text-decoration: none; }
-  .wiki-content a:hover { text-decoration: underline; }
+
+  .wiki-content h1 {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    margin-bottom: var(--space-4);
+    color: var(--accent);
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  .wiki-content h2 {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    margin: var(--space-6) 0 var(--space-3);
+    color: var(--ink-primary);
+    letter-spacing: var(--tracking-tight);
+  }
+
+  .wiki-content h3 {
+    font-size: var(--text-md);
+    font-weight: 600;
+    margin: var(--space-4) 0 var(--space-2);
+    color: var(--ink-primary);
+  }
+
+  .wiki-content p {
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    margin-bottom: var(--space-3);
+    color: var(--ink-secondary);
+  }
+
+  .wiki-content blockquote {
+    border-left: 3px solid var(--accent);
+    padding: var(--space-3) var(--space-4);
+    margin: var(--space-3) 0;
+    background: var(--surface-2);
+    font-size: var(--text-sm);
+    color: var(--ink-secondary);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+
+  .wiki-content ul {
+    font-size: var(--text-sm);
+    color: var(--ink-secondary);
+    padding-left: var(--space-6);
+    line-height: var(--leading-relaxed);
+  }
+
+  .wiki-content li {
+    margin-bottom: var(--space-1);
+  }
+
+  .wiki-content code {
+    background: var(--surface-2);
+    padding: 1px var(--space-1);
+    border-radius: 3px;
+    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+  }
+
+  .wiki-content a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+
+  .wiki-content a:hover {
+    border-bottom-color: var(--accent);
+  }
 
   .wiki-empty {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100%; color: var(--text2); gap: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--ink-tertiary);
+    gap: var(--space-2);
   }
-  .wiki-empty .icon { font-size: 40px; }
-  .wiki-empty .text { font-size: 14px; }
 
-  /* ─── New Memory Modal ─── */
+  .wiki-empty .icon { font-size: var(--text-3xl); }
+  .wiki-empty .text { font-size: var(--text-base); }
+
+  /* ─── No-content placeholders ─── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-12) var(--space-4);
+    color: var(--ink-tertiary);
+    text-align: center;
+    gap: var(--space-2);
+  }
+
+  .empty-state .icon { font-size: var(--text-3xl); }
+  .empty-state .text { font-size: var(--text-base); }
+  .empty-state .hint { font-size: var(--text-xs); }
+
+  /* ─── Modal ─── */
   .modal-overlay {
-    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-    z-index: 100; align-items: center; justify-content: center;
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    animation: overlayIn var(--duration-fast) var(--ease-out);
   }
+
   .modal-overlay.open { display: flex; }
+
+  @keyframes overlayIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   .modal {
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 24px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    background: var(--surface-1);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    padding: var(--space-6);
+    width: 520px;
+    max-width: 92vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-xl);
+    animation: modalIn var(--duration-modal) var(--ease-out);
   }
-  .modal h2 { font-size: 16px; margin-bottom: 16px; }
-  .modal label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; margin-top: 12px; }
-  .modal input, .modal textarea, .modal select {
-    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
-    padding: 8px; border-radius: 4px; font-size: 13px; font-family: inherit;
+
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
   }
-  .modal textarea { min-height: 80px; resize: vertical; }
-  .modal input:focus, .modal textarea:focus, .modal select:focus { outline: none; border-color: var(--accent); }
-  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
-  .modal-actions button {
-    padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit;
-    transition: opacity 0.15s;
+
+  .modal h2 {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    margin-bottom: var(--space-5);
+    letter-spacing: var(--tracking-tight);
   }
-  .modal-actions .btn-primary { background: var(--accent); border: none; color: white; }
-  .modal-actions .btn-secondary { background: var(--surface2); border: 1px solid var(--border); color: var(--text); }
-  .modal-actions button:hover { opacity: 0.85; }
+
+  .modal .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: var(--space-5);
+  }
+
+  .modal .modal-header h2 {
+    margin-bottom: 0;
+  }
+
+  .modal label {
+    display: block;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--ink-secondary);
+    margin-bottom: var(--space-1);
+    margin-top: var(--space-4);
+    letter-spacing: var(--tracking-wide);
+    text-transform: uppercase;
+  }
+
+  .modal input,
+  .modal textarea,
+  .modal select {
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border-default);
+    color: var(--ink-primary);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: border-color var(--duration-fast) var(--ease-out);
+  }
+
+  .modal textarea { min-height: 90px; resize: vertical; }
+
+  .modal input:focus,
+  .modal textarea:focus,
+  .modal select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: flex-end;
+    margin-top: var(--space-5);
+  }
 
   /* ─── Toast ─── */
-  .toast {
-    position: fixed; bottom: 20px; right: 20px;
-    background: var(--accent2); color: white; padding: 10px 16px;
-    border-radius: var(--radius); font-size: 13px; z-index: 200;
-    opacity: 0; transform: translateY(10px); transition: all 0.3s;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  .toast-container {
+    position: fixed;
+    bottom: var(--space-5);
+    right: var(--space-5);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    pointer-events: none;
   }
-  .toast.show { opacity: 1; transform: translateY(0); }
 
-  /* ─── Scrollbar ─── */
-  ::-webkit-scrollbar { width: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--border); }
+  .toast {
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    color: var(--ink-primary);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all var(--duration-slow) var(--ease-out);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
 
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .toast .toast-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .toast.success .toast-icon {
+    background: var(--green-muted);
+    color: var(--green);
+  }
+
+  .toast.error .toast-icon {
+    background: var(--red-muted);
+    color: var(--red);
+  }
+
+  /* ─── Memory Detail Specific ─── */
+  .detail-section {
+    margin-bottom: var(--space-4);
+  }
+
+  .detail-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .detail-label {
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--ink-tertiary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    margin-bottom: var(--space-1);
+  }
+
+  .detail-value {
+    font-size: var(--text-sm);
+    color: var(--ink-primary);
+    line-height: var(--leading-relaxed);
+  }
+
+  .detail-meta {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+
+  .detail-meta-item {
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+  }
+
+  .detail-storage {
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    background: var(--surface-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    line-height: var(--leading-relaxed);
+  }
+
+  .detail-tags {
+    display: flex;
+    gap: var(--space-1);
+    flex-wrap: wrap;
+    margin-top: var(--space-1);
+  }
+
+  .detail-tags span {
+    background: var(--surface-2);
+    padding: 1px var(--space-2);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--ink-tertiary);
+  }
+
+  /* ─── Context Box ─── */
+  .context-box {
+    background: var(--surface-2);
+    padding: var(--space-3);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    font-size: var(--text-xs);
+    color: var(--ink-secondary);
+    line-height: var(--leading-relaxed);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* ─── Responsive ─── */
   @media (max-width: 768px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .wiki-layout { flex-direction: column; }
     .wiki-sidebar { width: 100%; max-height: 200px; }
     #memories-list { grid-template-columns: 1fr; }
+    header { flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+    nav { margin-left: 0; width: 100%; overflow-x: auto; }
+    nav button { flex-shrink: 0; }
+    .modal { padding: var(--space-4); width: 95vw; }
   }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>☀️ Amnis</h1>
-    <span class="subtitle">Memory Graph</span>
+    <div class="logo">
+      <h1><span class="accent">☀️</span> Amnis</h1>
+      <span class="subtitle">Memory Graph</span>
+    </div>
     <nav>
-      <button class="active" data-tab="dashboard">📊 Dashboard</button>
-      <button data-tab="graph">🕸️ Graph</button>
-      <button data-tab="memories">🧠 Memories</button>
-      <button data-tab="search">🔍 Search</button>
-      <button data-tab="wiki">📝 Wiki</button>
+      <button class="active" data-tab="dashboard">Dashboard</button>
+      <button data-tab="graph">Graph</button>
+      <button data-tab="memories">Memories</button>
+      <button data-tab="search">Search</button>
+      <button data-tab="wiki">Wiki</button>
     </nav>
   </header>
 
@@ -284,20 +1279,59 @@
     <!-- Dashboard -->
     <div id="tab-dashboard" class="tab-content active">
       <div class="stats-grid" id="stats-grid">
-        <div class="stat-card memory"><div class="value" id="stat-memories">—</div><div class="label">Memories</div><div class="sub" id="stat-mem-avg">avg importance: —</div></div>
-        <div class="stat-card rag"><div class="value" id="stat-chunks">—</div><div class="label">RAG Chunks</div><div class="sub" id="stat-sources">sources: —</div></div>
-        <div class="stat-card wiki"><div class="value" id="stat-wiki">—</div><div class="label">Wiki Pages</div><div class="sub" id="stat-embed">model: —</div></div>
-        <div class="stat-card" style="border-color:var(--accent2)"><div class="value" id="stat-mem-by-cat">—</div><div class="label">Categories</div><div class="sub" id="stat-vault">vault: —</div></div>
+        <div class="stat-card memory">
+          <div class="stat-header">
+            <span class="stat-label">Memories</span>
+            <span class="stat-icon">🧠</span>
+          </div>
+          <div class="value" id="stat-memories"><div class="skeleton skeleton-value"></div></div>
+          <div class="sub" id="stat-mem-avg"><div class="skeleton skeleton-text w60"></div></div>
+        </div>
+        <div class="stat-card rag">
+          <div class="stat-header">
+            <span class="stat-label">RAG Chunks</span>
+            <span class="stat-icon">🔍</span>
+          </div>
+          <div class="value" id="stat-chunks"><div class="skeleton skeleton-value"></div></div>
+          <div class="sub" id="stat-sources"><div class="skeleton skeleton-text w40"></div></div>
+        </div>
+        <div class="stat-card wiki">
+          <div class="stat-header">
+            <span class="stat-label">Wiki Pages</span>
+            <span class="stat-icon">📖</span>
+          </div>
+          <div class="value" id="stat-wiki"><div class="skeleton skeleton-value"></div></div>
+          <div class="sub" id="stat-embed"><div class="skeleton skeleton-text w80"></div></div>
+        </div>
+        <div class="stat-card categories">
+          <div class="stat-header">
+            <span class="stat-label">Categories</span>
+            <span class="stat-icon">🏷️</span>
+          </div>
+          <div class="value" id="stat-mem-by-cat"><div class="skeleton skeleton-value"></div></div>
+          <div class="sub" id="stat-vault"><div class="skeleton skeleton-text w60"></div></div>
+        </div>
       </div>
       <div class="activity-section">
-        <div>
-          <div class="section-title">🕐 Recent Memories</div>
-          <ul class="memory-list" id="recent-memories"><li style="color:var(--text2)">Loading...</li></ul>
+        <div class="activity-panel">
+          <div class="panel-header">
+            <span class="panel-title">Recent Memories</span>
+            <span class="panel-badge" id="recent-count"></span>
+          </div>
+          <ul class="memory-list" id="recent-memories">
+            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px;"></li>
+            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px;"></li>
+            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px;"></li>
+          </ul>
         </div>
-        <div>
-          <div class="section-title">📊 Memory by Category</div>
-          <div id="category-chart" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;min-height:120px;">
-            <div style="color:var(--text2);font-size:12px;text-align:center;padding:20px;">Loading...</div>
+        <div class="activity-panel">
+          <div class="panel-header">
+            <span class="panel-title">Memory by Category</span>
+          </div>
+          <div class="category-chart" id="category-chart">
+            <div class="skeleton skeleton-block" style="margin-bottom:8px;"></div>
+            <div class="skeleton skeleton-block" style="margin-bottom:8px;"></div>
+            <div class="skeleton skeleton-block" style="margin-bottom:8px;"></div>
           </div>
         </div>
       </div>
@@ -307,14 +1341,14 @@
     <div id="tab-graph" class="tab-content">
       <div id="graph-container">
         <div id="graph-controls">
-          <button onclick="fitGraph()">⊞ Fit</button>
-          <button onclick="resetGraph()">↺ Reset</button>
-          <button onclick="refreshGraph()">⟳ Refresh</button>
+          <button onclick="fitGraph()">Fit</button>
+          <button onclick="resetGraph()">Reset</button>
+          <button onclick="refreshGraph()">Refresh</button>
         </div>
         <div id="graph-legend">
-          <div class="legend-item"><span class="legend-dot" style="background:#10b981"></span> Memory</div>
-          <div class="legend-item"><span class="legend-box" style="background:#8b5cf6"></span> Wiki Page</div>
-          <div class="legend-item"><span class="legend-square" style="background:#0ea5e9"></span> Document</div>
+          <div class="legend-item"><span class="legend-dot" style="background:var(--green)"></span> Memory</div>
+          <div class="legend-item"><span class="legend-box" style="background:var(--accent)"></span> Wiki Page</div>
+          <div class="legend-item"><span class="legend-square" style="background:var(--blue)"></span> Document</div>
         </div>
       </div>
     </div>
@@ -323,18 +1357,30 @@
     <div id="tab-memories" class="tab-content">
       <div class="memories-toolbar">
         <input type="text" id="mem-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')loadMemories()">
-        <select id="mem-category"><option value="">All Categories</option><option value="preference">Preference</option><option value="fact">Fact</option><option value="event">Event</option><option value="procedure">Procedure</option><option value="concept">Concept</option><option value="meta">Meta</option></select>
-        <button onclick="loadMemories()">Search</button>
-        <button onclick="showNewMemoryModal()" style="background:var(--accent2)">+ New Memory</button>
+        <select id="mem-category">
+          <option value="">All Categories</option>
+          <option value="preference">Preference</option>
+          <option value="fact">Fact</option>
+          <option value="event">Event</option>
+          <option value="procedure">Procedure</option>
+          <option value="concept">Concept</option>
+          <option value="meta">Meta</option>
+        </select>
+        <button class="btn btn-primary" onclick="loadMemories()">Search</button>
+        <button class="btn btn-success" onclick="showNewMemoryModal()">+ New Memory</button>
       </div>
-      <div id="memories-list"></div>
+      <div id="memories-list">
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
     </div>
 
     <!-- Search -->
     <div id="tab-search" class="tab-content">
       <div class="search-box">
         <input type="text" id="rag-query" placeholder="Ask anything in the vault..." onkeydown="if(event.key==='Enter')doSearch()">
-        <button onclick="doSearch()">Search</button>
+        <button class="btn btn-primary" onclick="doSearch()">Search</button>
       </div>
       <div id="search-results"></div>
     </div>
@@ -344,11 +1390,16 @@
       <div class="wiki-layout">
         <div class="wiki-sidebar">
           <input type="text" id="wiki-search" placeholder="Search wiki pages..." onkeydown="if(event.key==='Enter')loadWiki()">
-          <ul class="wiki-page-list" id="wiki-page-list"><li style="color:var(--text2);font-size:12px;">Loading...</li></ul>
+          <ul class="wiki-page-list" id="wiki-page-list">
+            <li class="skeleton skeleton-text" style="border:none;margin-bottom:6px;"></li>
+            <li class="skeleton skeleton-text w80" style="border:none;margin-bottom:6px;"></li>
+            <li class="skeleton skeleton-text" style="border:none;margin-bottom:6px;"></li>
+            <li class="skeleton skeleton-text w60" style="border:none;margin-bottom:6px;"></li>
+          </ul>
         </div>
         <div class="wiki-content" id="wiki-content">
           <div class="wiki-empty">
-            <div class="icon">📝</div>
+            <div class="icon">📖</div>
             <div class="text">Select a wiki page from the sidebar</div>
           </div>
         </div>
@@ -357,10 +1408,13 @@
   </main>
 </div>
 
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
 <!-- New Memory Modal -->
 <div class="modal-overlay" id="new-memory-modal">
   <div class="modal">
-    <h2>🧠 New Memory</h2>
+    <h2>New Memory</h2>
     <label>Fact</label>
     <textarea id="modal-fact" placeholder="What do you want to remember?"></textarea>
     <label>Category</label>
@@ -378,28 +1432,29 @@
     <label>Tags (comma separated)</label>
     <input type="text" id="modal-tags" placeholder="e.g. writing, linux, setup">
     <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeNewMemoryModal()">Cancel</button>
-      <button class="btn-primary" onclick="saveNewMemory()">Save</button>
+      <button class="btn btn-secondary" onclick="closeNewMemoryModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
     </div>
   </div>
 </div>
 
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
 <!-- Memory Detail Modal -->
 <div class="modal-overlay" id="memory-detail-modal">
   <div class="modal" style="max-width: 600px;">
-    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h2 style="margin:0;">🧠 Memory Details</h2>
-      <button class="btn-secondary" onclick="closeMemoryDetailModal()" style="padding:4px 12px;font-size:12px;">✕ Close</button>
+    <div class="modal-header">
+      <h2 style="margin:0;">Memory Details</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeMemoryDetailModal()" style="font-size:var(--text-md);">✕</button>
     </div>
-    <div id="memory-detail-content"></div>
-    <div class="modal-actions" style="margin-top:16px;">
-      <button class="btn-secondary" onclick="closeMemoryDetailModal()">Close</button>
-      <button class="btn-secondary" id="memory-detail-source-btn" onclick="" style="display:none;background:#0ea5e9;border-color:#0ea5e9;">📖 View Wiki Source</button>
-      <button class="btn-primary" id="memory-detail-edit-btn" onclick="editMemoryFromDetail()">✏️ Edit</button>
-      <button class="btn-secondary" id="memory-detail-delete-btn" onclick="deleteMemoryFromDetail()" style="background:var(--red);border-color:var(--red);">🗑️ Delete</button>
+    <div id="memory-detail-content">
+      <div class="skeleton skeleton-block" style="margin-bottom:var(--space-3);"></div>
+      <div class="skeleton skeleton-text w80" style="margin-bottom:var(--space-2);"></div>
+      <div class="skeleton skeleton-text"></div>
+    </div>
+    <div class="modal-actions" style="margin-top:var(--space-5);">
+      <button class="btn btn-secondary btn-sm" onclick="closeMemoryDetailModal()">Close</button>
+      <button class="btn btn-ghost btn-sm" id="memory-detail-source-btn" onclick="" style="display:none;">View Wiki Source</button>
+      <button class="btn btn-primary btn-sm" id="memory-detail-edit-btn" onclick="editMemoryFromDetail()">Edit</button>
+      <button class="btn btn-danger btn-sm" id="memory-detail-delete-btn" onclick="deleteMemoryFromDetail()">Delete</button>
     </div>
   </div>
 </div>
@@ -409,62 +1464,79 @@
 let network = null;
 let graphData = { nodes: [], edges: [] };
 let currentTab = 'dashboard';
-let currentMemoryId = null; // For detail modal
+let currentMemoryId = null;
+
+// ─── Toast System ───
+let toastTimer = null;
+function showToast(msg, type) {
+  type = type || 'success';
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  toast.innerHTML = `<span class="toast-icon">${type === 'success' ? '✓' : '✕'}</span>${msg}`;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
 
 // ─── Memory Detail Modal ───
 function showMemoryDetailModal(memoryId) {
   currentMemoryId = memoryId;
   const modal = document.getElementById('memory-detail-modal');
   const content = document.getElementById('memory-detail-content');
-  content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);">Loading...</div>';
+  content.innerHTML = '<div class="skeleton skeleton-block" style="margin-bottom:var(--space-3);"></div><div class="skeleton skeleton-text w80" style="margin-bottom:var(--space-2);"></div><div class="skeleton skeleton-text"></div>';
   modal.classList.add('open');
-  
+
   fetch(`/api/memories/${memoryId}`)
     .then(r => r.json())
     .then(m => {
       if (m.error || !m.id) {
-        content.innerHTML = `<div style="color:var(--red);padding:20px;">Memory not found</div>`;
+        content.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Memory not found</div></div>`;
         return;
       }
-      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
-      const color = colors[m.category] || '#94a3b8';
-      
-      // Check if source looks like a wiki page or document
+      const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
+      const color = colors[m.category] || 'var(--cat-general)';
+
       const source = m.source || '—';
       const isWikiSource = source.includes('wiki') || source.includes('Wiki');
       const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
-      
+
       content.innerHTML = `
-        <div style="margin-bottom:16px;">
+        <div class="detail-section">
           <span class="cat-badge" style="background:${color};font-size:11px;padding:2px 8px;">${m.category}</span>
-          <span style="margin-left:8px;font-size:12px;color:var(--text2)">⭐ Importance: ${m.importance}/10</span>
+          <span style="margin-left:8px;font-size:12px;color:var(--ink-tertiary)">Importance: ${m.importance}/10</span>
         </div>
-        <div style="font-size:14px;line-height:1.6;margin-bottom:16px;white-space:pre-wrap;">${escapeHtml(m.fact)}</div>
-        <div style="font-size:11px;color:var(--text2);display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
-          <span>📅 Created: ${m.timestamp ? new Date(m.timestamp).toLocaleString() : 'Unknown'}</span>
-          <span>📝 Source: ${escapeHtml(source)}</span>
-          <span>🎯 Confidence: ${m.confidence || '—'}</span>
+        <div class="detail-section">
+          <div class="detail-value" style="font-size:var(--text-base);white-space:pre-wrap;">${escapeHtml(m.fact)}</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-meta">
+            <span class="detail-meta-item">Created: ${m.timestamp ? new Date(m.timestamp).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'}) : 'Unknown'}</span>
+            <span class="detail-meta-item">Source: ${escapeHtml(source)}</span>
+            <span class="detail-meta-item">Confidence: ${m.confidence || '—'}</span>
+          </div>
         </div>
         ${m.tags && m.tags.length ? `
-          <div style="margin-bottom:12px;">
-            <strong style="font-size:11px;color:var(--text2);">Tags:</strong>
-            <div style="margin-top:4px;">${m.tags.map(t => `<span style="background:var(--surface2);padding:2px 8px;border-radius:3px;font-size:10px;color:var(--text2);margin-right:4px;display:inline-block;">#${escapeHtml(t)}</span>`).join('')}</div>
+          <div class="detail-section">
+            <div class="detail-label">Tags</div>
+            <div class="detail-tags">${m.tags.map(t => `<span>#${escapeHtml(t)}</span>`).join('')}</div>
           </div>
         ` : ''}
         ${m.context ? `
-          <div style="background:var(--bg);padding:12px;border-radius:4px;border:1px solid var(--border);font-size:12px;color:var(--text2);">
-            <strong>Context:</strong><br>${escapeHtml(m.context)}
+          <div class="detail-section">
+            <div class="detail-label">Context</div>
+            <div class="context-box">${escapeHtml(m.context)}</div>
           </div>
         ` : ''}
-        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
-          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
-          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
-            SQLite database → ~/amnis/data/memory.db
-          </div>
+        <div class="detail-section" style="padding-top:var(--space-3);border-top:1px solid var(--border-subtle);">
+          <div class="detail-label">Storage</div>
+          <div class="detail-storage">SQLite database → memory.db</div>
         </div>
       `;
-      
-      // Update source button visibility
+
       const sourceBtn = document.getElementById('memory-detail-source-btn');
       if (sourceBtn) {
         if (isWikiSource || isDocSource) {
@@ -476,29 +1548,21 @@ function showMemoryDetailModal(memoryId) {
       }
     })
     .catch(e => {
-      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+      content.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error loading: ${e.message}</div></div>`;
     });
 }
 
 function openWikiSource(source) {
-  // Try to find matching wiki page
   fetch('/api/wiki')
     .then(r => r.json())
     .then(data => {
       const pages = data.pages || [];
-      // Try exact match first, then partial
       let match = pages.find(p => p.title.toLowerCase() === source.toLowerCase());
-      if (!match) {
-        match = pages.find(p => p.title.toLowerCase().includes(source.toLowerCase()) || source.toLowerCase().includes(p.title.toLowerCase()));
-      }
-      // Also check sources array
-      if (!match) {
-        match = pages.find(p => (p.sources || []).some(s => s.includes(source) || source.includes(s)));
-      }
-      
+      if (!match) match = pages.find(p => p.title.toLowerCase().includes(source.toLowerCase()) || source.toLowerCase().includes(p.title.toLowerCase()));
+      if (!match) match = pages.find(p => (p.sources || []).some(s => s.includes(source) || source.includes(s)));
+
       if (match) {
         loadWikiPage(match.id);
-        // Switch to wiki tab
         document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
         document.querySelector('nav button[data-tab="wiki"]').classList.add('active');
         document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -506,10 +1570,10 @@ function openWikiSource(source) {
         currentTab = 'wiki';
         closeMemoryDetailModal();
       } else {
-        showToast(`No wiki page found for source: ${source}`);
+        showToast('No wiki page found for source: ' + source, 'error');
       }
     })
-    .catch(e => showToast('Error finding wiki source: ' + e.message));
+    .catch(e => showToast('Error finding wiki source: ' + e.message, 'error'));
 }
 
 function closeMemoryDetailModal() {
@@ -520,7 +1584,6 @@ function closeMemoryDetailModal() {
 function editMemoryFromDetail() {
   closeMemoryDetailModal();
   if (currentMemoryId) {
-    // Fetch full memory and populate edit modal
     fetch(`/api/memories/${currentMemoryId}`)
       .then(r => r.json())
       .then(m => {
@@ -529,7 +1592,6 @@ function editMemoryFromDetail() {
           document.getElementById('modal-category').value = m.category;
           document.getElementById('modal-importance').value = m.importance;
           document.getElementById('modal-tags').value = (m.tags || []).join(', ');
-          // Store the ID for update
           document.getElementById('new-memory-modal').dataset.editingId = m.id;
           showNewMemoryModal();
         }
@@ -543,16 +1605,16 @@ async function deleteMemoryFromDetail() {
   try {
     const res = await fetch(`/api/memories/${currentMemoryId}`, { method: 'DELETE' });
     if (res.ok) {
-      showToast('🗑️ Memory deleted');
+      showToast('Memory deleted');
       closeMemoryDetailModal();
       loadDashboard();
       loadMemories();
       refreshGraph();
     } else {
-      showToast('Error deleting memory');
+      showToast('Error deleting memory', 'error');
     }
   } catch (e) {
-    showToast('Error: ' + e.message);
+    showToast('Error: ' + e.message, 'error');
   }
 }
 
@@ -566,50 +1628,49 @@ function escapeHtml(text) {
 function showWikiDetailModal(pageId) {
   const modal = document.getElementById('memory-detail-modal');
   const content = document.getElementById('memory-detail-content');
-  content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2);">Loading wiki page...</div>';
+  content.innerHTML = '<div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text w60"></div>';
   modal.classList.add('open');
-  
+
   fetch(`/api/wiki/${pageId}`)
     .then(r => r.json())
     .then(page => {
       if (page.error || !page.id) {
-        content.innerHTML = `<div style="color:var(--red);padding:20px;">Wiki page not found</div>`;
+        content.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Wiki page not found</div></div>`;
         return;
       }
       const sources = page.sources || [];
       content.innerHTML = `
-        <div style="margin-bottom:16px;">
-          <span class="cat-badge" style="background:#8b5cf6;font-size:11px;padding:2px 8px;">Wiki Page</span>
+        <div class="detail-section">
+          <span class="cat-badge" style="background:var(--accent);font-size:11px;padding:2px 8px;">Wiki Page</span>
         </div>
-        <h3 style="margin-bottom:12px;color:var(--accent);">${escapeHtml(page.title)}</h3>
-        <div style="font-size:13px;line-height:1.6;margin-bottom:16px;max-height:300px;overflow-y:auto;white-space:pre-wrap;">${escapeHtml(page.content || 'No content')}</div>
+        <h3 style="margin-bottom:var(--space-3);color:var(--accent);font-size:var(--text-lg);">${escapeHtml(page.title)}</h3>
+        <div class="detail-section">
+          <div class="detail-value" style="max-height:300px;overflow-y:auto;white-space:pre-wrap;">${escapeHtml(page.content || 'No content')}</div>
+        </div>
         ${sources.length ? `
-          <div style="margin-bottom:12px;">
-            <strong style="font-size:11px;color:var(--text2);">Sources (${sources.length}):</strong>
-            <div style="margin-top:4px;max-height:150px;overflow-y:auto;">
-              ${sources.map(s => `<div style="font-size:11px;color:var(--text2);font-family:monospace;background:var(--bg);padding:4px 8px;margin:2px 0;border-radius:3px;">${escapeHtml(s)}</div>`).join('')}
+          <div class="detail-section">
+            <div class="detail-label">Sources (${sources.length})</div>
+            <div style="max-height:150px;overflow-y:auto;margin-top:var(--space-1);">
+              ${sources.map(s => `<div style="font-size:var(--text-xs);color:var(--ink-tertiary);font-family:var(--font-mono);background:var(--surface-2);padding:var(--space-1) var(--space-2);margin:2px 0;border-radius:var(--radius-sm);">${escapeHtml(s)}</div>`).join('')}
             </div>
           </div>
         ` : ''}
         ${page.related && page.related.length ? `
-          <div style="margin-bottom:12px;">
-            <strong style="font-size:11px;color:var(--text2);">Related:</strong>
-            <div style="margin-top:4px;">${page.related.map(r => `<span style="background:var(--surface2);padding:2px 8px;border-radius:3px;font-size:10px;color:var(--text2);margin-right:4px;display:inline-block;">${escapeHtml(r)}</span>`).join('')}</div>
+          <div class="detail-section">
+            <div class="detail-label">Related</div>
+            <div class="detail-tags">${page.related.map(r => `<span>${escapeHtml(r)}</span>`).join('')}</div>
           </div>
         ` : ''}
-        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
-          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
-          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
-            Wiki markdown → ~/amnis/data/wiki/${page.id}.md
-          </div>
+        <div class="detail-section" style="padding-top:var(--space-3);border-top:1px solid var(--border-subtle);">
+          <div class="detail-label">Storage</div>
+          <div class="detail-storage">Wiki markdown → wiki/${page.id}.md</div>
         </div>
       `;
-      // Hide source button for wiki nodes
       const sourceBtn = document.getElementById('memory-detail-source-btn');
       if (sourceBtn) sourceBtn.style.display = 'none';
     })
     .catch(e => {
-      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+      content.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error loading: ${e.message}</div></div>`;
     });
 }
 
@@ -617,65 +1678,63 @@ function showWikiDetailModal(pageId) {
 function showDocumentDetailModal(docTitle, nodeData) {
   const modal = document.getElementById('memory-detail-modal');
   const content = document.getElementById('memory-detail-content');
+  content.innerHTML = '<div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text w80"></div>';
   modal.classList.add('open');
-  
-  // Use the source from nodeData if available, otherwise fall back to title
+
   const sourcePath = (nodeData && nodeData.source) ? nodeData.source : docTitle;
-  
-  // Fetch all memories and filter by source (client-side since API query searches fact/content, not source)
+
   fetch('/api/memories?limit=200')
     .then(r => r.json())
     .then(data => {
-      const memories = (data.memories || []).filter(m => 
+      const memories = (data.memories || []).filter(m =>
         m.source && (m.source === sourcePath || m.source.includes(sourcePath) || sourcePath.includes(m.source))
       );
-      
+
+      const catColors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
+
       content.innerHTML = `
-        <div style="margin-bottom:16px;">
-          <span class="cat-badge" style="background:#0ea5e9;font-size:11px;padding:2px 8px;">Document</span>
+        <div class="detail-section">
+          <span class="cat-badge" style="background:var(--blue);font-size:11px;padding:2px 8px;">Document</span>
         </div>
-        <h3 style="margin-bottom:12px;color:#0ea5e9;">${escapeHtml(docTitle)}</h3>
-        <div style="font-size:13px;line-height:1.6;margin-bottom:16px;color:var(--text2);">
-          This document has been indexed into the RAG vector store. 
-          ${memories.length ? `Found ${memories.length} extracted memories from this source.` : 'No specific memories extracted yet.'}
+        <h3 style="margin-bottom:var(--space-3);color:var(--blue);font-size:var(--text-lg);">${escapeHtml(docTitle)}</h3>
+        <div class="detail-section">
+          <div class="detail-value" style="color:var(--ink-secondary);">
+            This document has been indexed into the RAG vector store.
+            ${memories.length ? ` Found ${memories.length} extracted memories from this source.` : ' No specific memories extracted yet.'}
+          </div>
         </div>
         ${sourcePath ? `
-          <div style="margin-bottom:12px;">
-            <strong style="font-size:11px;color:var(--text2);">Source Path:</strong>
-            <div style="margin-top:4px;font-size:11px;color:var(--text2);font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
-              ${escapeHtml(sourcePath)}
-            </div>
+          <div class="detail-section">
+            <div class="detail-label">Source Path</div>
+            <div class="detail-storage">${escapeHtml(sourcePath)}</div>
           </div>
         ` : ''}
         ${memories.length ? `
-          <div style="margin-bottom:12px;">
-            <strong style="font-size:11px;color:var(--text2);">Extracted Memories (${memories.length}):</strong>
-            <div style="margin-top:4px;max-height:250px;overflow-y:auto;">
+          <div class="detail-section">
+            <div class="detail-label">Extracted Memories (${memories.length})</div>
+            <div style="max-height:250px;overflow-y:auto;margin-top:var(--space-1);">
               ${memories.map(m => `
-                <div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px;margin:4px 0;font-size:12px;">
-                  <div style="display:flex;gap:8px;margin-bottom:4px;">
-                    <span class="cat-badge" style="background:${{preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'}[m.category]||'#94a3b8'}">${m.category}</span>
-                    <span style="font-size:10px;color:var(--text2)">⭐${m.importance}</span>
+                <div style="background:var(--surface-2);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:var(--space-2);margin:4px 0;font-size:var(--text-xs);">
+                  <div style="display:flex;gap:var(--space-2);margin-bottom:4px;">
+                    <span class="cat-badge" style="background:${catColors[m.category]||'var(--cat-general)'}">${m.category}</span>
+                    <span style="font-size:10px;color:var(--ink-tertiary)">${m.importance}/10</span>
                   </div>
-                  <div style="white-space:pre-wrap;color:var(--text);">${escapeHtml(m.fact.slice(0, 200))}${m.fact.length > 200 ? '...' : ''}</div>
+                  <div style="white-space:pre-wrap;color:var(--ink-primary);">${escapeHtml(m.fact.slice(0, 200))}${m.fact.length > 200 ? '...' : ''}</div>
                 </div>
               `).join('')}
             </div>
           </div>
         ` : ''}
-        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
-          <strong style="font-size:11px;color:var(--text2);">Storage:</strong>
-          <div style="font-size:12px;color:var(--text);margin-top:4px;font-family:monospace;background:var(--bg);padding:8px;border-radius:4px;">
-            ChromaDB vectors → ~/amnis/data/chroma/
-          </div>
+        <div class="detail-section" style="padding-top:var(--space-3);border-top:1px solid var(--border-subtle);">
+          <div class="detail-label">Storage</div>
+          <div class="detail-storage">ChromaDB vectors → data/chroma/</div>
         </div>
       `;
-      // Hide source button
       const sourceBtn = document.getElementById('memory-detail-source-btn');
       if (sourceBtn) sourceBtn.style.display = 'none';
     })
     .catch(e => {
-      content.innerHTML = `<div style="color:var(--red);padding:20px;">Error loading: ${e.message}</div>`;
+      content.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error loading: ${e.message}</div></div>`;
     });
 }
 
@@ -699,14 +1758,18 @@ async function loadDashboard() {
   try {
     const res = await fetch('/api/status');
     const data = await res.json();
-    document.getElementById('stat-memories').textContent = data.memory.total_memories;
-    document.getElementById('stat-mem-avg').textContent = `avg importance: ${data.memory.avg_importance}`;
-    document.getElementById('stat-chunks').textContent = data.rag.total_chunks || 0;
-    document.getElementById('stat-sources').textContent = `sources: ${data.rag.unique_sources || 0}`;
-    document.getElementById('stat-wiki').textContent = data.wiki.total_pages;
-    document.getElementById('stat-embed').textContent = `model: ${data.config.embedding_model}`;
-    document.getElementById('stat-mem-by-cat').textContent = Object.keys(data.memory.by_category || {}).length;
-    document.getElementById('stat-vault').textContent = `vault: ${data.config.vault.split('/').pop()}`;
+    document.getElementById('stat-memories').innerHTML = data.memory.total_memories;
+    document.getElementById('stat-mem-avg').innerHTML = `avg importance: ${data.memory.avg_importance}`;
+    document.getElementById('stat-chunks').innerHTML = data.rag.total_chunks || 0;
+    document.getElementById('stat-sources').innerHTML = `sources: ${data.rag.unique_sources || 0}`;
+    document.getElementById('stat-wiki').innerHTML = data.wiki.total_pages;
+    document.getElementById('stat-embed').innerHTML = `model: ${data.config.embedding_model}`;
+    document.getElementById('stat-mem-by-cat').innerHTML = Object.keys(data.memory.by_category || {}).length;
+    document.getElementById('stat-vault').innerHTML = `vault: ${data.config.vault.split('/').pop()}`;
+
+    const cats = data.memory.by_category || {};
+    const totalCats = Object.keys(cats).length;
+    document.getElementById('recent-count').textContent = totalCats > 0 ? `${totalCats} types` : '';
 
     // Recent memories
     const memRes = await fetch('/api/memories?limit=8');
@@ -714,21 +1777,20 @@ async function loadDashboard() {
     const list = document.getElementById('recent-memories');
     list.innerHTML = '';
     (memData.memories || []).forEach(m => {
-      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+      const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
       const li = document.createElement('li');
-      li.innerHTML = `<span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
+      li.innerHTML = `<span class="cat-badge" style="background:${colors[m.category]||'var(--cat-general)'}">${m.category}</span>
         <span class="fact-text">${m.fact}</span>
-        <span class="importance">⭐${m.importance}</span>`;
-      li.style.cursor = 'pointer';
+        <span class="importance-chip">${m.importance}/10</span>`;
       li.addEventListener('click', () => showMemoryDetailModal(m.id));
       li.title = 'Click to view details';
       list.appendChild(li);
     });
 
     // Category chart
-    renderCategoryChart(data.memory.by_category || {});
+    renderCategoryChart(cats);
   } catch (e) {
-    document.getElementById('recent-memories').innerHTML = `<li style="color:var(--red)">Error loading: ${e.message}</li>`;
+    document.getElementById('recent-memories').innerHTML = `<li style="color:var(--red)">Error loading</li>`;
   }
 }
 
@@ -736,24 +1798,20 @@ function renderCategoryChart(byCategory) {
   const container = document.getElementById('category-chart');
   const entries = Object.entries(byCategory);
   if (!entries.length) {
-    container.innerHTML = '<div style="color:var(--text2);font-size:12px;text-align:center;padding:20px;">No memories yet</div>';
+    container.innerHTML = '<div class="empty-state"><div class="text">No memories yet</div></div>';
     return;
   }
-  const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+  const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
   const total = entries.reduce((s, e) => s + e[1], 0);
-  let bars = '<div style="display:flex;flex-direction:column;gap:6px;">';
+  let bars = '';
   for (const [cat, count] of entries) {
     const pct = (count / total) * 100;
-    bars += `<div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">
-        <span>${cat}</span><span>${count}</span>
-      </div>
-      <div style="background:var(--bg);border-radius:4px;height:14px;overflow:hidden;">
-        <div style="background:${colors[cat]||'#94a3b8'};width:${pct}%;height:100%;border-radius:4px;"></div>
-      </div>
+    bars += `<div class="chart-bar-row">
+      <span class="chart-bar-label">${cat}</span>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${pct}%;background:${colors[cat]||'var(--cat-general)'}"></div></div>
+      <span class="chart-bar-count">${count}</span>
     </div>`;
   }
-  bars += '</div>';
   container.innerHTML = bars;
 }
 
@@ -762,24 +1820,22 @@ async function initGraph() {
   const container = document.getElementById('graph-container');
   if (!container) return;
 
-  // Destroy any existing network first (clean slate)
   if (network) {
     network.destroy();
     network = null;
   }
-  // Clear any leftover canvas
+
   container.innerHTML = `<div id="graph-controls">
-    <button onclick="fitGraph()">⊞ Fit</button>
-    <button onclick="resetGraph()">↺ Reset</button>
-    <button onclick="refreshGraph()">⟳ Refresh</button>
+    <button onclick="fitGraph()">Fit</button>
+    <button onclick="resetGraph()">Reset</button>
+    <button onclick="refreshGraph()">Refresh</button>
   </div>
   <div id="graph-legend">
-    <div class="legend-item"><span class="legend-dot" style="background:#10b981"></span> Memory</div>
-    <div class="legend-item"><span class="legend-box" style="background:#8b5cf6"></span> Wiki Page</div>
-    <div class="legend-item"><span class="legend-square" style="background:#0ea5e9"></span> Document</div>
+    <div class="legend-item"><span class="legend-dot" style="background:var(--green)"></span> Memory</div>
+    <div class="legend-item"><span class="legend-box" style="background:var(--accent)"></span> Wiki Page</div>
+    <div class="legend-item"><span class="legend-square" style="background:var(--blue)"></span> Document</div>
   </div>`;
 
-  // Small delay to let container get dimensions after tab switch
   await new Promise(r => setTimeout(r, 50));
   await refreshGraph();
 }
@@ -789,19 +1845,19 @@ async function refreshGraph() {
     const res = await fetch('/api/graph');
     graphData = await res.json();
   } catch (e) {
-    showToast('Error loading graph: ' + e.message);
+    showToast('Error loading graph: ' + e.message, 'error');
     return;
   }
 
   if (!graphData.nodes || graphData.nodes.length === 0) {
-    document.getElementById('graph-container').innerHTML += '<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text2);text-align:center;"><div style="font-size:40px;margin-bottom:8px;">🕸️</div><div>No graph data yet</div><div style="font-size:12px;margin-top:4px;">Add memories and index your vault to see connections</div></div>';
+    document.getElementById('graph-container').innerHTML += '<div class="graph-empty"><div class="icon">🕸️</div><div class="label">No graph data yet</div><div class="hint">Add memories and index your vault to see connections</div></div>';
     return;
   }
 
   const container = document.getElementById('graph-container');
   const options = {
     nodes: {
-      font: { size: 10, color: '#e2e8f0' },
+      font: { size: 10, color: '#a1a1aa' },
       borderWidth: 1,
       borderWidthSelected: 2,
     },
@@ -827,7 +1883,7 @@ async function refreshGraph() {
       dragView: true,
     },
     groups: {
-      memory: { shape: 'dot', color: '#10b981' },
+      memory: { shape: 'dot', color: '#22c55e' },
       wiki: { shape: 'box', color: '#8b5cf6', font: { color: '#e2e8f0' } },
       document: { shape: 'square', color: '#0ea5e9' },
     },
@@ -840,20 +1896,14 @@ async function refreshGraph() {
         const nodeId = params.nodes[0];
         const node = graphData.nodes.find(n => n.id === nodeId);
         if (node && node.data) {
-          // For memory nodes, open the memory detail modal
           if (node.group === 'memory' && node.data.id) {
             showMemoryDetailModal(node.data.id);
-          } 
-          // For wiki nodes, open wiki detail modal
-          else if (node.group === 'wiki' && node.data.id) {
+          } else if (node.group === 'wiki' && node.data.id) {
             showWikiDetailModal(node.data.id);
-          }
-          // For document nodes, open document detail modal
-          else if (node.group === 'document' && node.data.title) {
+          } else if (node.group === 'document' && node.data.title) {
             showDocumentDetailModal(node.data.title, node.data);
-          }
-          else {
-            showToast(`${node.group}: ${node.data.fact || node.data.title || node.label}`);
+          } else {
+            showToast(node.group + ': ' + (node.data.fact || node.data.title || node.label));
           }
         }
       }
@@ -862,7 +1912,7 @@ async function refreshGraph() {
       network.fit();
     });
   } catch (e) {
-    showToast('Graph render error: ' + e.message);
+    showToast('Graph render error: ' + e.message, 'error');
   }
 }
 
@@ -882,32 +1932,29 @@ async function loadMemories() {
     const container = document.getElementById('memories-list');
     container.innerHTML = '';
     if (!data.memories || data.memories.length === 0) {
-      container.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">No memories found</div>';
+      container.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><div class="text">No memories found</div><div class="hint">Create one with the + New Memory button</div></div>';
       return;
     }
-    const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
+    const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
     data.memories.forEach(m => {
       const card = document.createElement('div');
       card.className = 'memory-card';
-      const colors = {preference:'#f59e0b',fact:'#10b981',event:'#3b82f6',procedure:'#8b5cf6',concept:'#ec4899',meta:'#6b7280',general:'#94a3b8'};
       const source = m.source || '—';
       const isWikiSource = source.includes('wiki') || source.includes('Wiki');
       const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
       card.innerHTML = `<div class="card-header">
-        <span class="cat-badge" style="background:${colors[m.category]||'#94a3b8'}">${m.category}</span>
-        <span style="font-size:11px;color:var(--text2)">⭐${m.importance} · ${m.timestamp?.slice(0,10)||''}</span>
+        <span class="cat-badge" style="background:${colors[m.category]||'var(--cat-general)'}">${m.category}</span>
+        <span style="font-size:11px;color:var(--ink-tertiary)">${m.importance}/10 · ${m.timestamp?.slice(0,10)||''}</span>
       </div>
       <div class="card-fact">${m.fact}</div>
-      <div class="card-meta">source: ${source} · confidence: ${m.confidence}</div>
+      <div class="card-meta">source: ${source} · confidence: ${m.confidence || '—'}</div>
       ${(m.tags?.length) ? `<div class="card-tags">${m.tags.map(t => `<span>#${t}</span>`).join('')}</div>` : ''}
-      ${(isWikiSource || isDocSource) ? `<div style="margin-top:8px;"><button class="btn-secondary" style="font-size:11px;padding:4px 10px;background:#0ea5e9;border-color:#0ea5e9;" onclick="event.stopPropagation();openWikiSource('${source.replace(/'/g, "\\'")}')">📖 View Wiki Source</button></div>` : ''}`;
-      card.style.cursor = 'pointer';
+      ${(isWikiSource || isDocSource) ? `<div class="card-actions"><button class="btn btn-ghost btn-xs" style="background:var(--blue-muted);color:var(--blue);" onclick="event.stopPropagation();openWikiSource('${source.replace(/'/g, "\\'")}')">View Wiki Source</button></div>` : ''}`;
       card.addEventListener('click', () => showMemoryDetailModal(m.id));
-      card.title = 'Click to view details';
       container.appendChild(card);
     });
   } catch (e) {
-    document.getElementById('memories-list').innerHTML = `<div style="color:var(--red);padding:20px;">Error: ${e.message}</div>`;
+    document.getElementById('memories-list').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ${e.message}</div></div>`;
   }
 }
 
@@ -921,17 +1968,15 @@ function closeNewMemoryModal() {
 }
 async function saveNewMemory() {
   const fact = document.getElementById('modal-fact').value.trim();
-  if (!fact) { showToast('Please enter a fact'); return; }
+  if (!fact) { showToast('Please enter a fact', 'error'); return; }
   const tags = document.getElementById('modal-tags').value.split(',').map(t => t.trim()).filter(Boolean);
-  
-  // Check if we're editing an existing memory
+
   const editingId = document.getElementById('new-memory-modal').dataset.editingId;
   const isEditing = !!editingId;
-  
+
   try {
     let res, data;
     if (isEditing) {
-      // Update existing memory - delete and recreate (simpler than adding PATCH endpoint)
       await fetch(`/api/memories/${editingId}`, { method: 'DELETE' });
       res = await fetch('/api/memories', {
         method: 'POST',
@@ -945,9 +1990,8 @@ async function saveNewMemory() {
         })
       });
       data = await res.json();
-      showToast('✅ Memory updated!');
+      showToast('Memory updated!');
     } else {
-      // Create new memory
       res = await fetch('/api/memories', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -960,9 +2004,9 @@ async function saveNewMemory() {
         })
       });
       data = await res.json();
-      showToast('✅ Memory saved!');
+      showToast('Memory saved!');
     }
-    
+
     closeNewMemoryModal();
     document.getElementById('modal-fact').value = '';
     document.getElementById('modal-tags').value = '';
@@ -971,7 +2015,7 @@ async function saveNewMemory() {
     loadDashboard();
     refreshGraph();
   } catch (e) {
-    showToast('Error: ' + e.message);
+    showToast('Error: ' + e.message, 'error');
   }
 }
 
@@ -985,19 +2029,19 @@ async function doSearch() {
     const container = document.getElementById('search-results');
     container.innerHTML = '';
     if (!data.results || data.results.length === 0) {
-      container.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">No results found</div>';
+      container.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><div class="text">No results found</div><div class="hint">Try a different search query</div></div>';
       return;
     }
     data.results.forEach(r => {
       const div = document.createElement('div');
       div.className = 'search-result';
-      div.innerHTML = `<div class="result-source">📄 ${r.source}</div>
+      div.innerHTML = `<div class="result-source">${r.source}</div>
         <div class="result-content">${r.content}</div>
         <div class="result-score">relevance: ${(r.score * 100).toFixed(0)}%</div>`;
       container.appendChild(div);
     });
   } catch (e) {
-    document.getElementById('search-results').innerHTML = `<div style="color:var(--red);padding:20px;">Error: ${e.message}</div>`;
+    document.getElementById('search-results').innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ${e.message}</div></div>`;
   }
 }
 
@@ -1013,18 +2057,18 @@ async function loadWiki() {
     const list = document.getElementById('wiki-page-list');
     list.innerHTML = '';
     if (!wikiPages.length) {
-      list.innerHTML = '<li style="color:var(--text2);font-size:12px;">No wiki pages</li>';
+      list.innerHTML = '<li style="color:var(--ink-tertiary);font-size:12px;border:none;cursor:default;">No wiki pages</li>';
       return;
     }
     wikiPages.forEach(p => {
       const li = document.createElement('li');
-      li.textContent = p.title;
+      li.innerHTML = `${escapeHtml(p.title)}${p.summary ? `<div class="page-summary">${escapeHtml(p.summary.slice(0, 80))}</div>` : ''}`;
       li.dataset.id = p.id;
       li.addEventListener('click', () => loadWikiPage(p.id));
       list.appendChild(li);
     });
   } catch (e) {
-    document.getElementById('wiki-page-list').innerHTML = `<li style="color:var(--red);font-size:12px;">Error: ${e.message}</li>`;
+    document.getElementById('wiki-page-list').innerHTML = `<li style="color:var(--red);font-size:12px;border:none;cursor:default;">Error: ${e.message}</li>`;
   }
 }
 
@@ -1037,7 +2081,6 @@ async function loadWikiPage(pageId) {
     const res = await fetch(`/api/wiki/${pageId}`);
     const page = await res.json();
     const container = document.getElementById('wiki-content');
-    // Render markdown-like content as HTML (simple conversion)
     let html = page.content
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -1059,19 +2102,8 @@ async function loadWikiByTitle(title) {
   if (page) loadWikiPage(page.id);
 }
 
-// ─── Toast ───
-let toastTimer = null;
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
-}
-
 // ─── Init ───
 loadDashboard();
-// Load graph on demand (when tab is clicked)
 </script>
 </body>
 </html>
