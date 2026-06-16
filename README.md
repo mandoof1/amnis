@@ -13,10 +13,25 @@ LLMs are stateless. Every conversation starts from zero. Amnis fixes that by add
 | Layer | Purpose | Backend |
 |-------|---------|---------|
 | **Memory Store** | Persistent facts, preferences, events with categories, importance, tags | SQLite |
-| **RAG Engine** | Semantic search over local documents (Obsidian vault, PDFs, code, notes) | ChromaDB + sentence-transformers |
+| **RAG Engine** | Hybrid search over local documents (Obsidian vault, PDFs, code, notes) | ChromaDB + sentence-transformers + FTS5 |
 | **Wiki Compiler** | Karpathy-style structured knowledge pages auto-generated from all sources | Markdown + cross-refs |
 
 Together, these create a **personal knowledge graph** that grows smarter over time.
+
+---
+
+## Features
+
+- **Hybrid RAG search** — Reciprocal Rank Fusion (RRF) blending semantic (ChromaDB) + keyword (FTS5) results for precision
+- **Heading-aware chunking** — Respects H1–H6 boundaries so sections stay intact
+- **Episodic memory** — Chronological event log with auto-pruning, outcome tracking, and per-episode importance
+- **Reflection hierarchy** — Observations auto-clustered into mid-level themes (Stanford Generative Agents paper)
+- **Working memory** — In-memory ring buffer for agent scratchpad, with JSON persistence and episodic flush
+- **Pruning pipeline** — Low-importance, stale, and near-duplicate fact cleanup with confidence decay (0.98^days)
+- **Contradiction detection** — Polarity-based flagging of conflicting facts
+- **Semantic dedup** — Cosine-similarity merging of near-identical memories
+- **Web UI** — Dashboard, interactive knowledge graph, memory browser, wiki viewer
+- **MCP server** — 18+ tools for agent integration
 
 ---
 
@@ -28,7 +43,8 @@ Together, these create a **personal knowledge graph** that grows smarter over ti
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
 │  │   Memory     │  │    RAG       │  │     Wiki         │   │
 │  │   Store      │  │   Engine     │  │   Compiler       │   │
-│  │  (SQLite)    │  │ (ChromaDB)   │  │   (Markdown)     │   │
+│  │  (SQLite)    │  │ (ChromaDB    │  │   (Markdown)     │   │
+│  │              │  │  + FTS5)     │  │                  │   │
 │  └──────┬───────┘  └──────┬───────┘  └────────┬─────────┘   │
 │         │                 │                   │              │
 └─────────┼─────────────────┼───────────────────┼──────────────┘
@@ -36,8 +52,9 @@ Together, these create a **personal knowledge graph** that grows smarter over ti
           ▼                 ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    MCP Server (stdio)                        │
-│  14 tools: remember, recall, forget, search, index,         │
-│  consolidate, compile-wiki, wiki_query, status, ...         │
+│  18+ tools: remember, recall, forget, search, hybrid-search,│
+│  episodic-log, episodic-recall, prune, consolidate,         │
+│  compile-wiki, wiki_query, status, ...                      │
 └─────────────────────────────────────────────────────────────┘
                               ▲
                               │ MCP / HTTP
@@ -104,9 +121,13 @@ python -m amnis web
 | `recall "query" [--category X] [--limit N]` | Retrieve memories |
 | `forget <memory_id>` | Delete a memory |
 | `search "query" [--limit N]` | Semantic search vault |
+| `hybrid-search "query" [--limit N]` | RRF hybrid search (semantic + keyword) |
 | `index <file_path>` | Index a single document |
 | `index-vault` | Re-index entire Obsidian vault |
 | `compile-wiki [topic ...]` | Build wiki pages |
+| `episodic-log <session> <role> <content>` | Log a conversation turn |
+| `episodic-recall <session> [--limit N]` | Retrieve episode history |
+| `prune` | Run memory cleanup (stale, low-importance, duplicates) |
 | `status` | Show memory/RAG/wiki stats |
 
 ---
@@ -122,22 +143,49 @@ mcp_servers:
     args: ["-m", "amnis.server.mcp"]
 ```
 
+### Memory Tools
+
 | Tool | Description |
 |------|-------------|
 | `amnis_remember` | Store a fact with category, importance (1-10), tags |
 | `amnis_recall` | Query memories by text, category, importance |
 | `amnis_forget` | Delete memory by ID |
 | `amnis_memory_stats` | Total memories, by category, avg importance |
-| `amnis_consolidate` | Extract new facts from conversation logs |
-| `amnis_search` | Semantic search over indexed documents |
+| `amnis_consolidate` | Extract new facts from conversation logs + reflection |
+| `amnis_prune_memory` | Run cleanup pipeline (decay, stale, duplicates) |
+
+### Search Tools
+
+| Tool | Description |
+|------|-------------|
+| `amnis_search` | Semantic search over indexed documents (with optional metadata filter) |
+| `amnis_hybrid_search` | RRF hybrid search — semantic + FTS5 with metadata filter |
 | `amnis_index_file` | Add a file to the vector store |
 | `amnis_index_vault` | Full vault re-index |
 | `amnis_rag_stats` | Chunk count, unique sources, embedding model |
+
+### Episodic Tools
+
+| Tool | Description |
+|------|-------------|
+| `amnis_episodic_log` | Log a conversation episode (optionally with outcome + results) |
+| `amnis_episodic_recall` | Retrieve recent episodes for a session |
+
+### Wiki Tools
+
+| Tool | Description |
+|------|-------------|
 | `amnis_compile_wiki` | Build wiki from all knowledge layers |
 | `amnis_wiki_query` | Ask wiki a natural language question |
 | `amnis_wiki_lint` | Find stale pages, missing sources, broken refs |
 | `amnis_wiki_stats` | Page count, source count, wiki directory |
+
+### System Tools
+
+| Tool | Description |
+|------|-------------|
 | `amnis_status` | Full system health check |
+| `amnis_amnis_remember` | Alias for amnis_remember |
 
 ---
 
@@ -152,7 +200,7 @@ http://127.0.0.1:8799/
 - **📊 Dashboard** — System stats, recent memories, category distribution
 - **🕸️ Graph** — Interactive vis.js knowledge graph (memories, wiki pages, documents as nodes; keyword/source edges)
 - **🧠 Memories** — Browse, search, filter, create memories with inline forms
-- **🔍 Search** — RAG semantic search over vault with relevance scores
+- **🔍 Search** — RAG hybrid search over vault with relevance scores
 - **📝 Wiki** — Sidebar navigation + rendered markdown content viewer
 
 ![Dark theme, responsive, works on mobile]
@@ -164,7 +212,7 @@ http://127.0.0.1:8799/
 ```
 ~/amnis/                    # or $AMNIS_DATA_DIR
 ├── data/
-│   ├── memory.db           # SQLite: facts, prefs, events
+│   ├── memory.db           # SQLite: facts, prefs, events, episodes
 │   ├── chroma/             # ChromaDB vector embeddings
 │   └── wiki/               # Compiled .md wiki pages
 ├── .venv/                  # Python environment
@@ -187,6 +235,7 @@ export AMNIS_HOST=127.0.0.1
 export AMNIS_PORT=8799
 export AMNIS_CHUNK_SIZE=500
 export AMNIS_CHUNK_OVERLAP=50
+export AMNIS_HYBRID_WEIGHT=0.5
 ```
 
 Or create `config.yaml` in the data directory (see `amnis/config.py` for schema).
@@ -219,13 +268,19 @@ python -m amnis index-vault
 python -m amnis remember "Prefers dark mode in all editors" --category preference --importance 8 --tags ui,config
 python -m amnis remember "Project 'Hermes Agent' uses FastAPI + MCP stdio" --category fact --importance 7 --tags project,architecture
 
-# 3. Compile wiki from memories + vault
+# 3. Run consolidation to extract facts from conversation logs
+python -m amnis consolidate
+
+# 4. Compile wiki from memories + vault
 python -m amnis compile-wiki
 
-# 4. Query the wiki
+# 5. Hybrid search
+python -m amnis hybrid-search "memory architecture"
+
+# 6. Query the wiki
 python -m amnis wiki-query "What are the key architectural decisions?"
 
-# 5. In Hermes/Claude, just ask naturally:
+# 7. In Hermes/Claude, just ask naturally:
 #   "What did I say about dark mode preference?"
 #   "Search my vault for 'memory consolidation'"
 #   "Compile the wiki for the 'architecture' topic"
@@ -235,12 +290,12 @@ python -m amnis wiki-query "What are the key architectural decisions?"
 
 ## Roadmap
 
-- [ ] Hybrid search (BM25 + vector) for better precision
 - [ ] Incremental vault indexing (watch for file changes)
 - [ ] Graph export (GraphML, JSON) for external tools
 - [ ] Multi-vault support
 - [ ] Auth proxy for remote web UI access
 - [ ] Plugin system for custom memory types
+- [ ] High-level belief synthesis across theme clusters
 
 ---
 

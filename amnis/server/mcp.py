@@ -27,6 +27,8 @@ from mcp.types import (
 
 from ..memory import store as memory_store
 from ..memory import consolidation as memory_consolidation
+from ..memory import episodic as memory_episodic
+from ..memory import pruning as memory_pruning
 from ..rag.engine import engine as rag_engine
 from ..wiki.compiler import compiler as wiki_compiler
 from ..config import config
@@ -158,6 +160,10 @@ async def list_tools() -> list[Tool]:
                         "description": "Max results (default: 5)",
                         "default": 5,
                     },
+                    "where": {
+                        "type": "object",
+                        "description": "Metadata filter (e.g., {'source': {'$contains': 'memory'}})",
+                    },
                 },
                 "required": ["query"],
             },
@@ -183,8 +189,25 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="amnis_rag_stats",
-            description="Get RAG engine statistics — indexed chunks, sources, model info.",
+            description="Get RAG engine statistics — indexed chunks, sources, embedding model, keyword index.",
             inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="amnis_hybrid_search",
+            description="Hybrid search combining semantic (ChromaDB) + keyword (FTS5) with weighted ranking. Best for finding documents when you need both meaning and exact keyword matches.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results", "default": 5},
+                    "semantic_weight": {"type": "number", "description": "Weight for semantic search (0.0-1.0). Lower = more keyword-heavy.", "default": 0.7},
+                    "where": {
+                        "type": "object",
+                        "description": "Metadata filter (e.g., {'source': {'$contains': 'memory'}})",
+                    },
+                },
+                "required": ["query"],
+            },
         ),
 
         # ── Wiki Tools ──
@@ -225,6 +248,65 @@ async def list_tools() -> list[Tool]:
             name="amnis_wiki_stats",
             description="Get wiki statistics — page count, source count, directory.",
             inputSchema={"type": "object", "properties": {}},
+        ),
+
+        # ── Episodic Memory Tools ──
+        Tool(
+            name="amnis_episodic_log",
+            description="Log a conversation turn as an episodic memory. Stores the interaction with extracted topics and a summary for later recall.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session identifier"},
+                    "role": {"type": "string", "enum": ["user", "assistant"], "description": "Who spoke"},
+                    "content": {"type": "string", "description": "The interaction content"},
+                    "summary": {"type": "string", "description": "Optional summary (auto-generated if not provided)"},
+                    "topics": {"type": "array", "items": {"type": "string"}, "description": "Optional topic tags (auto-extracted if not provided)"},
+                    "outcome": {"type": "string", "enum": ["success", "failure", "neutral"], "description": "Optional outcome of the interaction"},
+                    "results": {"type": "object", "description": "Optional structured outcome data"},
+                },
+                "required": ["session_id", "role", "content"],
+            },
+        ),
+        Tool(
+            name="amnis_episodic_recall",
+            description="Recall episodic memories with filters — by session, topic, or role.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Filter by session ID"},
+                    "topic": {"type": "string", "description": "Filter by topic keyword"},
+                    "role": {"type": "string", "enum": ["user", "assistant"], "description": "Filter by role"},
+                    "limit": {"type": "integer", "description": "Max results", "default": 20},
+                },
+            },
+        ),
+        Tool(
+            name="amnis_episodic_stats",
+            description="Get episodic memory statistics — total episodes, unique sessions, date range.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
+            name="amnis_episodic_prune",
+            description="Delete episodic memories older than the retention period (default: 30 days). Frees up space without affecting permanent semantic memory.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Retention period in days", "default": 30},
+                },
+            },
+        ),
+
+        # ── Pruning Tools ──
+        Tool(
+            name="amnis_prune",
+            description="Run automatic memory pruning — removes expired, low-importance/stale, and duplicate memories. Pass dry_run=true to preview without deleting anything.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "description": "If true, only report what would be pruned without deleting", "default": false},
+                },
+            },
         ),
 
         # ── Meta Tools ──
@@ -286,6 +368,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             results = rag_engine.search(
                 query=arguments["query"],
                 limit=arguments.get("limit", 5),
+                where=arguments.get("where"),
             )
             if not results:
                 return _ok("📄 No RAG results found.")
@@ -307,7 +390,24 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
 
         elif name == "amnis_rag_stats":
             stats = rag_engine.stats()
-            return _ok(f"📊 RAG Stats: {stats.get('total_chunks', 0)} chunks from {stats.get('unique_sources', 0)} sources", stats)
+            return _ok(f"📊 RAG Stats: {stats.get('total_chunks', 0)} chunks from {stats.get('unique_sources', 0)} sources. Keyword index: {stats.get('keyword_index', {}).get('total_entries', 0)} entries", stats)
+
+        elif name == "amnis_hybrid_search":
+            results = rag_engine.hybrid_search(
+                query=arguments["query"],
+                limit=arguments.get("limit", 5),
+                semantic_weight=arguments.get("semantic_weight"),
+                where=arguments.get("where"),
+            )
+            if not results:
+                return _ok("📄 No hybrid search results found.")
+            summary = f"🔀 Hybrid Search: {len(results)} results for '{arguments['query']}'\\n"
+            for r in results:
+                label = f"[{r.get('search_type', '?')}]"
+                heading = f" › {r['heading']}" if r.get('heading') else ""
+                summary += f"\\n  {label} {r['source']}{heading} (score: {r.get('hybrid_score', r['score']):.2f})"
+                summary += f"\\n  > {r['content'][:150]}"
+            return _ok(summary, results)
 
         elif name == "amnis_compile_wiki":
             result = wiki_compiler.compile(topics=arguments.get("topics"))
@@ -332,6 +432,63 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             stats = wiki_compiler.stats()
             return _ok(f"📊 Wiki Stats: {stats['total_pages']} pages", stats)
 
+        # ── Episodic Handlers ──
+        elif name == "amnis_episodic_log":
+            result = memory_episodic.log_episode(
+                session_id=arguments["session_id"],
+                role=arguments["role"],
+                content=arguments["content"],
+                summary=arguments.get("summary"),
+                topics=arguments.get("topics"),
+                outcome=arguments.get("outcome"),
+                results=arguments.get("results"),
+            )
+            return _ok(f"📝 Episode logged (topics: {result.get('topics', [])})", result)
+
+        elif name == "amnis_episodic_recall":
+            results = memory_episodic.recall_episodes(
+                session_id=arguments.get("session_id"),
+                topic=arguments.get("topic"),
+                role=arguments.get("role"),
+                limit=arguments.get("limit", 20),
+            )
+            if not results:
+                return _ok("📝 No episodes found.")
+            summary = f"📝 Found {len(results)} episode(s):\\n"
+            for e in results:
+                topics = ", ".join(e.get("topics", [])[:3])
+                summary += f"\\n  [{e['role']}] {e['summary'][:100]}"
+                summary += f"\\n  Topics: {topics} | {e['timestamp'][:10]}"
+            return _ok(summary, results)
+
+        elif name == "amnis_episodic_stats":
+            stats = memory_episodic.stats()
+            return _ok(f"📊 Episodic Stats: {stats['total_episodes']} episodes across {stats['unique_sessions']} sessions", stats)
+
+        elif name == "amnis_episodic_prune":
+            count = memory_episodic.prune_old_episodes(days=arguments.get("days", 30))
+            return _ok(f"🧹 Pruned {count} old episodes")
+
+        # ── Pruning Handlers ──
+        elif name == "amnis_prune":
+            result = memory_pruning.run_pipeline(dry_run=arguments.get("dry_run", False))
+            if result.get("dry_run"):
+                return _ok(
+                    f"🔍 Dry Run: would remove {result['total_removed']} memories "
+                    f"({result['expired_removed']} expired, "
+                    f"{result['duplicate_candidates']} duplicates, "
+                    f"{result['low_importance_candidates']} low-importance stale)",
+                    result
+                )
+            return _ok(
+                f"🧹 Pruned {result['total_removed']} memories "
+                f"({result['expired_removed']} expired, "
+                f"{result['duplicates_merged']} merged duplicates, "
+                f"{result['low_importance_pruned']} low-importance stale)",
+                result
+            )
+
+        # ── Meta ──
         elif name == "amnis_status":
             mem_stats = memory_store.stats()
             rag_stats = rag_engine.stats()

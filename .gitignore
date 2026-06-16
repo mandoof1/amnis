@@ -31,3 +31,10 @@ amnis-web.service
 # Test files (personal test data)
 test_amnis.py
 test_mcp.py
+
+# Personal analysis scripts (not part of the app)
+check_memories.py
+check_sources.py
+create_vault_memories.py
+memory-gap-analysis.md
+*.bak

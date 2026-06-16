@@ -66,6 +66,8 @@ class ConversationLog(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     summary = Column(Text, nullable=True)
     topics = Column(JSON, default=list)
+    outcome = Column(String(20), nullable=True)  # success / failure / neutral
+    results = Column(JSON, nullable=True)  # structured outcome data
 
 
 def init_db():

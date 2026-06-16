@@ -26,10 +26,26 @@ class AmnisConfig(BaseSettings):
     chunk_size: int = 512
     chunk_overlap: int = 64
     default_search_limit: int = 5
+    semantic_weight: float = 0.7      # hybrid search: weight for semantic vs keyword (0.0-1.0)
 
     # Memory
     memory_default_limit: int = 10
     consolidation_batch_size: int = 100
+
+    # Consolidation
+    dedup_similarity_threshold: float = 0.85   # merge memories above this cosine similarity
+    contradiction_distance_threshold: float = 0.92  # flag memories this close with opposing sentiment
+    importance_boost_recent: int = 2            # extra importance for memories from last session
+    importance_boost_frequent: int = 1          # extra importance per 3 access counts
+
+    # Episodic Memory
+    episodic_retention_days: int = 30           # auto-prune episodes older than this
+    episodic_max_per_session: int = 50          # max episodes stored per session ID
+
+    # Pruning
+    prune_low_importance: int = 3               # delete memories below this importance when pruning
+    prune_unaccessed_days: int = 60             # delete low-importance memories unaccessed this long
+    prune_batch_size: int = 50                  # max memories pruned per run
 
     # Wiki
     wiki_max_pages: int = 100
