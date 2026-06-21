@@ -2,9 +2,9 @@
 
 Handles:
   - Indexing documents (markdown, text, code)
-  - Semantic + keyword hybrid search (upgraded: FTS5 keyword index)
-  - Heading-aware chunking for markdown files (upgraded from word-level)
-  - Vault synchronization
+  - Semantic + keyword hybrid search (FTS5 keyword index)
+  - Heading-aware chunking for markdown files
+  - Notes directory indexing
 """
 import hashlib
 import os
@@ -464,23 +464,65 @@ class RagEngine:
             "chunks": len(chunks),
         }
 
-    def index_vault(self) -> dict:
-        """Index all markdown files in the Obsidian vault."""
-        vault = Path(config.vault_path)
-        if not vault.exists():
-            return {"error": f"Vault not found: {vault}", "indexed": 0, "files": 0}
+    def index_notes(self) -> dict:
+        """Index all markdown files in Amnis's notes directory."""
+        notes_dir = Path(config.notes_dir)
+        if not notes_dir.exists():
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            return {"warning": f"Notes directory created at {notes_dir}", "indexed": 0, "files": 0}
 
-        md_files = list(vault.rglob("*.md")) + list(vault.rglob("*.txt"))
+        md_files = list(notes_dir.rglob("*.md")) + list(notes_dir.rglob("*.txt"))
         total_indexed = 0
         total_files = 0
         errors = []
 
         for f in md_files:
-            # Skip hidden files and obsidian internals
-            rel = f.relative_to(vault)
+            # Skip hidden files
+            rel = f.relative_to(notes_dir)
             if any(p.startswith(".") for p in rel.parts):
                 continue
-            if ".obsidian" in str(rel):
+
+            result = self.index_file(str(f))
+            if result.get("indexed", 0) > 0:
+                total_indexed += result["indexed"]
+                total_files += 1
+            elif "error" in result:
+                errors.append(result["error"])
+
+        return {
+            "files_indexed": total_files,
+            "chunks_indexed": total_indexed,
+            "total_found": len(md_files),
+            "errors": errors,
+        }
+
+    def index_wiki(self) -> dict:
+        """Index all markdown files in the wiki directory into ChromaDB + FTS5.
+
+        This is the vault mechanism — drop .md files into data/wiki/ and they
+        become searchable via semantic and keyword search. Run this after
+        adding or editing wiki pages.
+        """
+        wiki_dir = Path(config.wiki_dir)
+        if not wiki_dir.exists():
+            wiki_dir.mkdir(parents=True, exist_ok=True)
+            return {"warning": f"Wiki directory created at {wiki_dir}", "files_indexed": 0, "chunks_indexed": 0}
+
+        # Also index the facts subdirectory (auto-created from memory store)
+        facts_dir = Path(config.wiki_facts_dir)
+        md_files = list(wiki_dir.rglob("*.md")) + list(wiki_dir.rglob("*.txt"))
+
+        total_indexed = 0
+        total_files = 0
+        errors = []
+
+        for f in md_files:
+            # Skip hidden files and the index (we compile it separately)
+            rel = f.relative_to(wiki_dir)
+            if any(p.startswith(".") for p in rel.parts):
+                continue
+            # Skip the auto-generated index page — wiki compiler handles it
+            if rel.name == "index.md" and len(rel.parts) == 1:
                 continue
 
             result = self.index_file(str(f))

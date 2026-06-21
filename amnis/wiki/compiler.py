@@ -1,6 +1,6 @@
 """Wiki Compiler — Karpathy-style structured knowledge from indexed sources.
 
-Reads the vault and indexed documents, compiles structured markdown wiki pages
+Reads indexed documents and memory, compiles structured markdown wiki pages
 with cross-references, summaries, and relationship mapping.
 """
 import uuid
@@ -14,7 +14,7 @@ from ..rag.engine import engine as rag_engine
 
 
 class WikiCompiler:
-    """Compiles structured wiki pages from vault + memory sources."""
+    """Compiles structured wiki pages from indexed documents and memory sources."""
 
     def __init__(self):
         config.wiki_dir.mkdir(parents=True, exist_ok=True)
@@ -79,6 +79,10 @@ class WikiCompiler:
 
     def _compile_topic(self, topic: str) -> dict:
         """Compile a single wiki page for a topic."""
+        # Sanitize topic for filename use
+        safe_name = topic.lower().replace(" ", "-").replace("/", "-")
+        safe_name = "".join(c for c in safe_name if c.isalnum() or c in "-_.")
+        safe_name = safe_name[:100]  # cap filename length to avoid FS errors
         # Search RAG for content about this topic
         rag_results = rag_engine.search(topic, limit=10)
 
@@ -163,8 +167,7 @@ class WikiCompiler:
         finally:
             session.close()
 
-        # Write to wiki directory
-        safe_name = topic.lower().replace(" ", "-").replace("/", "-")
+        # Write to wiki directory — use pre-sanitized safe_name from above
         wiki_file = config.wiki_dir / f"{safe_name}.md"
         wiki_file.write_text(content, encoding="utf-8")
 

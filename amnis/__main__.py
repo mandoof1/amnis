@@ -8,10 +8,11 @@ Usage:
   python -m amnis search <query>      # RAG semantic search
   python -m amnis hybrid-search <query>  # Hybrid semantic + keyword search
   python -m amnis index <path>        # Index a file
-  python -m amnis index-vault         # Index entire vault
+  python -m amnis index-notes         # Index all notes in notes directory
+  python -m amnis index-wiki           # Index all wiki files into ChromaDB (vault sync)
   python -m amnis compile-wiki        # Compile wiki
   python -m amnis status              # Show all stats
-  python -m amnis init                # Initialize (create dirs, index vault)
+  python -m amnis init                # Initialize (create dirs, index notes)
   python -m amnis episodic-log        # Log an episode (session role content)
   python -m amnis episodic-recall     # Recall episodes
   python -m amnis episodic-prune      # Prune old episodes
@@ -86,15 +87,26 @@ def main():
         result = engine.index_file(args[1])
         print_json(result)
 
-    elif args[0] == "index-vault":
+    elif args[0] == "index-notes":
         from .rag.engine import engine
-        result = engine.index_vault()
+        result = engine.index_notes()
+        print_json(result)
+
+    elif args[0] in ("index-vault",):
+        # Legacy alias — redirect to index-notes
+        from .rag.engine import engine
+        result = engine.index_notes()
         print_json(result)
 
     elif args[0] == "compile-wiki":
         from .wiki.compiler import compiler
         topics = args[1:] if len(args) > 1 else None
         result = compiler.compile(topics=topics)
+        print_json(result)
+
+    elif args[0] in ("index-wiki", "index_wiki"):
+        from .rag.engine import engine
+        result = engine.index_wiki()
         print_json(result)
 
     elif args[0] == "status":
@@ -109,7 +121,7 @@ def main():
             "wiki": wiki_compiler.stats(),
             "episodic": memory_episodic.stats(),
             "config": {
-                "vault": str(config.vault_path),
+                "notes_dir": str(config.notes_dir),
                 "data_dir": str(config.data_dir),
                 "embedding_model": config.embedding_model,
             },
@@ -215,9 +227,9 @@ def main():
         print(f"   Wiki: {config.wiki_dir}")
         print(f"   Chroma: {config.chroma_dir}")
 
-        # Index vault
-        print("\n📚 Indexing vault...")
-        result = engine.index_vault()
+        # Index notes
+        print("\n📚 Indexing notes...")
+        result = engine.index_notes()
         print(f"   Files: {result.get('files_indexed', 0)}")
         print(f"   Chunks: {result.get('chunks_indexed', 0)}")
 
@@ -242,7 +254,7 @@ def main():
 
     else:
         print(f"Unknown command: {args[0]}")
-        print("Usage: python -m amnis [server|remember|recall|search|hybrid-search|index|index-vault|compile-wiki|status|rag-stats|episodic-log|episodic-recall|episodic-prune|prune|init]")
+        print("Usage: python -m amnis [server|remember|recall|search|hybrid-search|index|index-notes|index-vault|compile-wiki|status|rag-stats|episodic-log|episodic-recall|episodic-prune|prune|init]")
 
 
 if __name__ == "__main__":

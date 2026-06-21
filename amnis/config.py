@@ -11,9 +11,9 @@ class AmnisConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Paths
+    # Paths — Amnis manages its own data, no external vault dependency
     data_dir: Path = Path.home() / "amnis" / "data"
-    vault_path: Path = Path.home() / "Documents" / "Obsidian Vault"
+    notes_dir: Path = Path.home() / "amnis" / "data" / "notes"
     wiki_dir: Path = Path.home() / "amnis" / "data" / "wiki"
     memory_db: Path = Path.home() / "amnis" / "data" / "memory.db"
     chroma_dir: Path = Path.home() / "amnis" / "data" / "chroma"
@@ -50,6 +50,7 @@ class AmnisConfig(BaseSettings):
     # Wiki
     wiki_max_pages: int = 100
     wiki_max_tokens: int = 200_000
+    wiki_facts_dir: Path = Path.home() / "amnis" / "data" / "wiki" / "facts"
 
     # Server
     host: str = "127.0.0.1"

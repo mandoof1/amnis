@@ -11,14 +11,14 @@ Use this skill when you need to remember something across sessions, search LO's 
 - `amnis_memory_stats()` — Memory store statistics
 - `amnis_consolidate()` — Extract facts from conversation logs
 
-### RAG Layer (vector search over vault/docs)
+### RAG Layer (vector search over indexed documents)
 - `amnis_search(query, limit)` — Semantic search over indexed documents
 - `amnis_index_file(file_path)` — Index a file
-- `amnis_index_vault()` — Index entire Obsidian vault
+- `amnis_index_notes()` — Index all notes in Amnis's notes directory
 - `amnis_rag_stats()` — Vector store statistics
 
 ### Wiki Layer (compiled knowledge)
-- `amnis_compile_wiki(topics)` — Compile wiki pages from vault + memory
+- `amnis_compile_wiki(topics)` — Compile wiki pages from indexed notes + memory
 - `amnis_wiki_query(question)` — Query the compiled wiki
 - `amnis_wiki_lint()` — Check for stale/missing content
 - `amnis_wiki_stats()` — Wiki statistics
@@ -32,7 +32,7 @@ Use this skill when you need to remember something across sessions, search LO's 
 |---|---|
 | LO tells you something about himself | `amnis_remember` — category=preference/fact, importance=7-10 |
 | You need to recall past context | `amnis_recall` — search by keyword |
-| LO asks about something in his vault | `amnis_search` — semantic search |
+| LO asks about something in his notes | `amnis_search` — semantic search |
 | You need compiled knowledge on a topic | `amnis_wiki_query` or `amnis_compile_wiki` |
 | End of a session | `amnis_consolidate` to extract facts from recent chat |
 

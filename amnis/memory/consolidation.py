@@ -218,7 +218,7 @@ def compute_importance(
     lower = fact_text.lower()
     if any(p in lower for p in ["prefer", "use", "work", "like", "have", "run", "setup"]):
         importance += 1
-    if any(p in lower for p in ["arch", "linux", "cachyos", "terminal", "vault", "obsidian"]):
+    if any(p in lower for p in ["arch", "linux", "cachyos", "terminal"]):
         importance += 1
 
     # Access frequency boost

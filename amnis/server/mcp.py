@@ -147,7 +147,7 @@ async def list_tools() -> list[Tool]:
         # ── RAG Tools ──
         Tool(
             name="amnis_search",
-            description="Semantic search over indexed documents (Obsidian vault, notes, code). Use this to find knowledge LO has written in his vault.",
+            description="Semantic search over indexed documents (notes, code, markdown).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -183,8 +183,8 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
-            name="amnis_index_vault",
-            description="Index (or re-index) the entire Obsidian vault for semantic search.",
+            name="amnis_index_notes",
+            description="Index (or re-index) all notes in the Amnis notes directory for semantic search.",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
@@ -213,7 +213,7 @@ async def list_tools() -> list[Tool]:
         # ── Wiki Tools ──
         Tool(
             name="amnis_compile_wiki",
-            description="Compile the knowledge wiki — reads vault + memory, generates structured markdown wiki pages with cross-references.",
+            description="Compile the knowledge wiki — reads indexed notes + memory, generates structured markdown wiki pages with cross-references.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -384,9 +384,9 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 return _ok(f"⚠️ {result['error']}")
             return _ok(f"📥 Indexed {result['indexed']} chunks from {arguments['file_path']}", result)
 
-        elif name == "amnis_index_vault":
-            result = rag_engine.index_vault()
-            return _ok(f"📚 Vault indexed: {result['files_indexed']} files, {result['chunks_indexed']} chunks", result)
+        elif name in ("amnis_index_notes", "amnis_index_vault"):
+            result = rag_engine.index_notes()
+            return _ok(f"📚 Notes indexed: {result['files_indexed']} files, {result['chunks_indexed']} chunks", result)
 
         elif name == "amnis_rag_stats":
             stats = rag_engine.stats()
@@ -502,7 +502,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 f"**RAG Engine:** {rag_stats.get('total_chunks', 0)} chunks, "
                 f"{rag_stats.get('unique_sources', 0)} sources\n"
                 f"**Wiki:** {wiki_stats.get('total_pages', 0)} pages\n"
-                f"**Vault:** {config.vault_path}\n"
+                f"**Notes Dir:** {config.notes_dir}\n"
                 f"**Embedding Model:** {config.embedding_model}"
             )
             return _ok(report, {
@@ -511,7 +511,7 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 "rag": rag_stats,
                 "wiki": wiki_stats,
                 "config": {
-                    "vault": str(config.vault_path),
+                    "notes_dir": str(config.notes_dir),
                     "data_dir": str(config.data_dir),
                     "embedding_model": config.embedding_model,
                 },

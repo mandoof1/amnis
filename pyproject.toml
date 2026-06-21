@@ -9,7 +9,7 @@ description = "Persistent Memory + RAG + Wiki Compilation for AI Agents (MCP)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-keywords = ["memory", "rag", "knowledge-graph", "mcp", "obsidian", "ai-agent"]
+keywords = ["memory", "rag", "knowledge-graph", "mcp", "ai-agent"]
 
 authors = [
     {name = "ENI & LO"},
@@ -31,5 +31,5 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/flexingmeowman/amnis"
-Repository = "https://github.com/flexingmeowman/amnis"
+Homepage = "https://github.com/mandoof1/amnis"
+Repository = "https://github.com/mandoof1/amnis"

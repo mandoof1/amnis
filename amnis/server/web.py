@@ -54,7 +54,7 @@ async def api_status():
         "rag": rag_stats,
         "wiki": wiki_stats,
         "config": {
-            "vault": str(config.vault_path),
+            "notes_dir": str(config.notes_dir),
             "data_dir": str(config.data_dir),
             "embedding_model": config.embedding_model,
         },
@@ -319,10 +319,10 @@ async def api_index_file(data: dict):
     return result
 
 
-@app.post("/api/index-vault")
-async def api_index_vault():
-    """Index entire vault."""
-    result = rag_engine.index_vault()
+@app.post("/api/index-notes")
+async def api_index_notes():
+    """Index all notes in Amnis's notes directory."""
+    result = rag_engine.index_notes()
     return result
 
 

@@ -2,7 +2,7 @@
 
 Three layers:
   - Memory Store: SQLite-backed persistent fact storage (cross-session facts, prefs)
-  - RAG Engine: ChromaDB + sentence-transformers semantic search over vault/docs
+  - RAG Engine: ChromaDB + sentence-transformers semantic search over indexed documents
   - Wiki Compiler: Karpathy-style structured knowledge compilation into markdown
 """
 from . import config, database
