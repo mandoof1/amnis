@@ -426,26 +426,39 @@ _CATEGORY_COLORS = {
 
 
 @app.get("/api/graph")
-def api_graph(limit: int = Query(default=150, ge=1, le=600)) -> dict:
-    """Nodes and edges for the knowledge graph view.
+def api_graph(
+    limit: int = Query(default=120, ge=1, le=600),
+    min_importance: int = Query(default=0, ge=0, le=10),
+) -> dict:
+    """Nodes and edges for the knowledge graph.
 
-    Edges come from an inverted index over significant words rather than the
-    old O(nodes²) nested scan that stopped at the first match per memory.
+    Edges come from real relations — shared tags between memories, tag/title
+    overlap with wiki pages, and a wiki page's recorded sources. The first
+    version linked anything whose words happened to overlap, which produced
+    a dense mesh that carried no information.
     """
     nodes: list[dict] = []
     edges: list[dict] = []
 
     memories = _memory().all_memories(limit=limit)
+    if min_importance:
+        memories = [m for m in memories if m["importance"] >= min_importance]
+
     for m in memories:
         nodes.append(
             {
                 "id": f"mem_{m['id']}",
-                "label": m["fact"][:60] + ("…" if len(m["fact"]) > 60 else ""),
+                "label": m["fact"][:70] + ("…" if len(m["fact"]) > 70 else ""),
                 "tooltip": m["fact"],
                 "group": "memory",
                 "color": _CATEGORY_COLORS.get(m["category"], "#94a3b8"),
                 "weight": m["importance"],
-                "meta": {"category": m["category"], "importance": m["importance"], "id": m["id"]},
+                "meta": {
+                    "category": m["category"],
+                    "importance": m["importance"],
+                    "id": m["id"],
+                    "tags": m["tags"],
+                },
             }
         )
 
@@ -454,8 +467,8 @@ def api_graph(limit: int = Query(default=150, ge=1, le=600)) -> dict:
         nodes.append(
             {
                 "id": f"wiki_{p['id']}",
-                "label": p["title"][:40],
-                "tooltip": f"{p['title']} — {len(p['sources'])} sources",
+                "label": p["title"][:44],
+                "tooltip": f"{p['title']} — {len(p['sources'])} sources, v{p['version']}",
                 "group": "wiki",
                 "color": "#8b5cf6",
                 "weight": 6,
@@ -471,7 +484,7 @@ def api_graph(limit: int = Query(default=150, ge=1, le=600)) -> dict:
         nodes.append(
             {
                 "id": node_id,
-                "label": Path(d["path"]).stem[:40],
+                "label": Path(d["path"]).stem[:44],
                 "tooltip": d["path"],
                 "group": "document",
                 "color": "#0ea5e9",
@@ -480,25 +493,47 @@ def api_graph(limit: int = Query(default=150, ge=1, le=600)) -> dict:
             }
         )
 
-    # Inverted index: word -> node ids, so linking is O(total words).
-    label_index: dict[str, set[str]] = {}
-    for n in nodes:
-        if n["group"] == "memory":
+    # ── memory ↔ memory: shared tags ────────────────────────────────
+    # A tag is an explicit, user-authored relation, unlike incidental word
+    # overlap. Very common tags are skipped: a tag on half the corpus is a
+    # category, not a link, and connecting all of it produces a hairball.
+    by_tag: dict[str, list[str]] = {}
+    for m in memories:
+        for tag in m["tags"] or []:
+            by_tag.setdefault(tag.lower(), []).append(f"mem_{m['id']}")
+
+    seen: set[tuple[str, str]] = set()
+    tag_cap = max(2, len(memories) // 4)
+    for tag, members in by_tag.items():
+        if len(members) < 2 or len(members) > tag_cap:
             continue
-        for word in {w for w in n["label"].lower().replace("-", " ").split() if len(w) > 3}:
-            label_index.setdefault(word, set()).add(n["id"])
+        # Connect as a ring rather than a clique: same connectivity, O(n)
+        # edges instead of O(n²), and the cluster still reads as a cluster.
+        for a, b in zip(members, members[1:] + members[:1], strict=True):
+            pair = tuple(sorted((a, b)))
+            if a != b and pair not in seen:
+                seen.add(pair)
+                edges.append({"from": a, "to": b, "kind": "tag", "label": tag})
 
-    seen_edges: set[tuple[str, str]] = set()
-    for m, node in zip(memories, nodes[: len(memories)], strict=True):
-        words = {w for w in m["fact"].lower().split()[:12] if len(w) > 3}
-        for word in words:
-            for target in label_index.get(word, ()):  # noqa: B007
-                pair = (node["id"], target)
-                if pair in seen_edges:
-                    continue
-                seen_edges.add(pair)
-                edges.append({"from": node["id"], "to": target, "kind": "mention"})
+    # ── memory ↔ wiki: the memory's tags name the page ──────────────
+    wiki_by_word: dict[str, str] = {}
+    for p in wiki_pages:
+        for word in p["title"].lower().replace("-", " ").split():
+            if len(word) > 3:
+                wiki_by_word.setdefault(word, f"wiki_{p['id']}")
 
+    for m in memories:
+        source = f"mem_{m['id']}"
+        for tag in m["tags"] or []:
+            target = wiki_by_word.get(tag.lower())
+            if not target:
+                continue
+            pair = tuple(sorted((source, target)))
+            if pair not in seen:
+                seen.add(pair)
+                edges.append({"from": source, "to": target, "kind": "topic"})
+
+    # ── wiki → document: recorded sources ───────────────────────────
     for p in wiki_pages:
         for src in p["sources"]:
             target = doc_by_path.get(src)
