@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "amnis"
-version = "0.1.0"
+version = "0.2.0"
 description = "Persistent Memory + RAG + Wiki Compilation for AI Agents (MCP)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,21 +15,54 @@ authors = [
     {name = "ENI & LO"},
 ]
 
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     "chromadb>=1.5",
-    "mcp>=1.0",
+    "mcp>=1.9",
     "fastapi>=0.100",
     "uvicorn>=0.20",
     "pydantic-settings>=2.0",
     "sqlalchemy>=2.0",
     "sentence-transformers>=2.2",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
 dev = [
     "httpx",
+    "pytest>=7",
+    "ruff>=0.5",
 ]
+
+[project.scripts]
+amnis = "amnis.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/mandoof1/amnis"
 Repository = "https://github.com/mandoof1/amnis"
+
+[tool.setuptools.packages.find]
+include = ["amnis*"]
+
+[tool.setuptools.package-data]
+"amnis.server" = ["ui.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501", "B008"]

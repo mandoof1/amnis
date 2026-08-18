@@ -1,276 +1,413 @@
-"""Wiki Compiler — Karpathy-style structured knowledge from indexed sources.
+"""Wiki compiler — structured markdown pages built from RAG + memory.
 
-Reads indexed documents and memory, compiles structured markdown wiki pages
-with cross-references, summaries, and relationship mapping.
+Three correctness fixes over 0.1:
+
+* **No self-citation.** Compiled pages were indexed into the same collection
+  the compiler retrieves from, so by the second run a page's top sources were
+  previous versions of itself. Retrieval now excludes ``origin == "compiled"``.
+* **Exact title match.** Page lookup used ``title ILIKE '%topic%'``, so
+  compiling "Rust" would find and overwrite the "Rust Async Runtimes" page,
+  and compiling "Go" matched almost everything. Titles are matched exactly.
+* **Read and write in one session.** ``existing`` was fetched in a session
+  that was then closed; the update branch mutated a detached object, so
+  ``version`` never incremented and edits were dropped. Everything now happens
+  inside a single ``session_scope()``.
 """
+
+from __future__ import annotations
+
+import logging
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+
+from sqlalchemy import func
 
 from ..config import config
-from ..database import get_session, WikiPage, IndexedDocument, MemoryFact
-from ..rag.engine import engine as rag_engine
+from ..database import IndexedDocument, MemoryFact, WikiPage, session_scope
+
+logger = logging.getLogger(__name__)
+
+_STOP_WORDS = {
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "do",
+    "does",
+    "did",
+    "what",
+    "which",
+    "who",
+    "when",
+    "where",
+    "why",
+    "how",
+    "of",
+    "in",
+    "on",
+    "for",
+    "to",
+    "with",
+    "about",
+    "from",
+    "my",
+    "your",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "i",
+    "you",
+}
+
+
+def _safe_filename(topic: str) -> str:
+    safe = topic.lower().replace(" ", "-").replace("/", "-")
+    safe = "".join(c for c in safe if c.isalnum() or c in "-_.")
+    return safe[:100].strip("-") or "untitled"
 
 
 class WikiCompiler:
-    """Compiles structured wiki pages from indexed documents and memory sources."""
+    """Compiles wiki pages from indexed documents and stored memories."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         config.wiki_dir.mkdir(parents=True, exist_ok=True)
 
-    def compile(self, topics: Optional[list[str]] = None) -> dict:
-        """Compile wiki pages. If topics given, compile specific ones.
-        
-        For each topic:
-          1. Search RAG for relevant content
-          2. Search memory for relevant facts
-          3. Compile into structured markdown page
-          4. Cross-reference with existing pages
-        """
-        if topics:
-            results = []
-            for topic in topics:
-                page = self._compile_topic(topic)
-                results.append(page)
-            return {"compiled": len(results), "pages": results}
-        else:
-            # Auto-detect topics from indexed documents
-            return self._compile_all()
+    # ─── compilation ───────────────────────────────────────────────────
 
-    def _compile_all(self) -> dict:
-        """Auto-discover topics and compile all wiki pages."""
-        # Get all indexed document titles
-        session = get_session()
-        try:
-            docs = session.query(IndexedDocument).all()
-            # Extract topic candidates from titles and paths
-            topics = set()
+    def compile(self, topics: list[str] | None = None) -> dict:
+        if topics:
+            pages = [self._compile_topic(t) for t in topics]
+            return {"compiled": len(pages), "pages": pages}
+        return self._compile_all()
+
+    def _discover_topics(self) -> list[str]:
+        with session_scope() as session:
+            docs = session.query(IndexedDocument).filter(IndexedDocument.origin != "compiled").all()
+            topics: set[str] = set()
             for doc in docs:
-                name = doc.title or Path(doc.path).stem
-                # Clean up filename to get topic
-                name = name.replace("-", " ").replace("_", " ")
-                # Skip common non-topics
-                if name.lower() in ("index", "readme", ""):
+                name = (doc.title or Path(doc.path).stem).replace("-", " ").replace("_", " ")
+                if name.lower().strip() in ("index", "readme", ""):
                     continue
                 if not any(c.isalpha() for c in name):
                     continue
-                topics.add(name)
+                topics.add(name.strip())
 
-            # Also get memory categories as topics
-            categories = session.query(MemoryFact.category).distinct().all()
-            for (cat,) in categories:
-                if cat and cat not in ("general",):
+            for (cat,) in session.query(MemoryFact.category).distinct().all():
+                if cat and cat != "general":
                     topics.add(cat)
+        return sorted(topics)
 
-        finally:
-            session.close()
+    def _compile_all(self) -> dict:
+        topics = self._discover_topics()[: config.wiki_max_pages]
+        pages = [self._compile_topic(t) for t in topics]
+        self._write_index(pages)
+        return {"compiled": len(pages), "pages": pages}
 
-        # Compile each topic
-        results = []
-        for topic in sorted(topics)[:config.wiki_max_pages]:
-            page = self._compile_topic(topic)
-            results.append(page)
+    def _retrieve(self, topic: str, limit: int = 10) -> list[dict]:
+        """Search source material only — never Amnis's own compiled output."""
+        from ..rag.engine import RagError, get_engine
 
-        # Write all to wiki directory
-        self._write_index(results)
-
-        return {"compiled": len(results), "pages": results}
+        try:
+            return get_engine().search(topic, limit=limit, where={"origin": {"$ne": "compiled"}})
+        except RagError as exc:
+            logger.warning("RAG unavailable while compiling %r: %s", topic, exc)
+            return []
 
     def _compile_topic(self, topic: str) -> dict:
-        """Compile a single wiki page for a topic."""
-        # Sanitize topic for filename use
-        safe_name = topic.lower().replace(" ", "-").replace("/", "-")
-        safe_name = "".join(c for c in safe_name if c.isalnum() or c in "-_.")
-        safe_name = safe_name[:100]  # cap filename length to avoid FS errors
-        # Search RAG for content about this topic
-        rag_results = rag_engine.search(topic, limit=10)
+        title = topic.title()
+        rag_results = self._retrieve(topic)
 
-        # Search memory for facts about this topic
         from ..memory.store import recall
+
         memories = recall(query=topic, limit=10)
 
-        # Get existing page if any
-        session = get_session()
-        try:
-            existing = (
-                session.query(WikiPage)
-                .filter(WikiPage.title.ilike(f"%{topic}%"))
-                .first()
-            )
-        finally:
-            session.close()
+        sources: list[str] = []
+        parts = [
+            f"# {title}\n",
+            "> *Auto-compiled wiki page — last updated: "
+            f"{datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}*\n",
+        ]
 
-        # Compile content
-        sources = []
-        content_parts = [f"# {topic.title()}\n"]
-        content_parts.append(f"> *Auto-compiled wiki page — last updated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*\n")
-
-        # RAG findings section
         if rag_results:
-            content_parts.append("## Key Sources\n")
+            parts.append("## Key Sources\n")
             for r in rag_results[:5]:
-                content_parts.append(f"- **[{r['source']}]({r['source']})** — relevance: {r['score']:.2f}")
-                content_parts.append(f"  > {r['content'][:200]}")
+                parts.append(f"- **[{r['source']}]({r['source']})** — relevance: {r['score']:.2f}")
+                parts.append(f"  > {r['content'][:200]}")
+                parts.append("")
                 sources.append(r["source"])
-                content_parts.append("")
 
-        # Memory facts section
         if memories:
-            content_parts.append("## Related Facts\n")
+            parts.append("## Related Facts\n")
             for m in memories[:5]:
-                content_parts.append(f"- [{m['category']}] {m['fact']}  ")
-                content_parts.append(f"  *Importance: {m['importance']}/10, source: {m['source']}*")
-                content_parts.append("")
+                parts.append(f"- [{m['category']}] {m['fact']}  ")
+                parts.append(f"  *Importance: {m['importance']}/10, source: {m['source']}*")
+                parts.append("")
 
-        # Find related topics
-        all_tags = set()
+        tags: set[str] = set()
         for r in rag_results:
-            src = Path(r["source"]).stem if r.get("source") else ""
-            if src:
-                all_tags.add(src.replace("-", " ").replace("_", " "))
+            stem = Path(r["source"]).stem if r.get("source") else ""
+            if stem:
+                tags.add(stem.replace("-", " ").replace("_", " "))
         for m in memories:
-            if m.get("tags"):
-                all_tags.update(m["tags"])
+            tags.update(m.get("tags") or [])
 
-        related = [t for t in all_tags if t.lower() != topic.lower()][:10]
+        related = sorted(t for t in tags if t.lower() != topic.lower())[:10]
         if related:
-            content_parts.append("## Related Topics\n")
-            for r in related:
-                content_parts.append(f"- [[{r.title()}]]")
-            content_parts.append("")
+            parts.append("## Related Topics\n")
+            parts.extend(f"- [[{r.title()}]]" for r in related)
+            parts.append("")
 
-        content = "\n".join(content_parts)
+        content = "\n".join(parts)
+        sources = sorted(set(sources))
 
-        # Save to DB
-        session = get_session()
-        try:
-            if existing:
+        with session_scope() as session:
+            existing = session.query(WikiPage).filter(WikiPage.title == title).first()
+            if existing is not None:
                 existing.content = content
+                existing.summary = content[:200]
                 existing.sources = sources
                 existing.related = related
-                existing.last_compiled = datetime.now(timezone.utc)
-                existing.version += 1
+                existing.last_compiled = datetime.now(UTC)
+                existing.version = (existing.version or 1) + 1
+                page_id, version = existing.id, existing.version
             else:
                 page = WikiPage(
                     id=str(uuid.uuid4()),
-                    title=topic.title(),
+                    title=title,
                     content=content,
                     summary=content[:200],
                     sources=sources,
                     related=related,
                     tags=[topic.lower()],
-                    last_compiled=datetime.now(timezone.utc),
+                    last_compiled=datetime.now(UTC),
+                    version=1,
                 )
                 session.add(page)
-            session.commit()
-        finally:
-            session.close()
+                page_id, version = page.id, 1
 
-        # Write to wiki directory — use pre-sanitized safe_name from above
-        wiki_file = config.wiki_dir / f"{safe_name}.md"
-        wiki_file.write_text(content, encoding="utf-8")
+        wiki_file = config.wiki_dir / f"{_safe_filename(topic)}.md"
+        try:
+            wiki_file.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not write %s: %s", wiki_file, exc)
 
         return {
-            "title": topic.title(),
+            "id": page_id,
+            "title": title,
+            "version": version,
             "sources": len(sources),
             "memories": len(memories),
             "related": len(related),
             "file": str(wiki_file),
         }
 
-    def _write_index(self, pages: list[dict]):
-        """Write a master index of all wiki pages."""
+    def _write_index(self, pages: list[dict]) -> None:
         lines = [
             "# Amnis Wiki Index\n",
             f"> Auto-generated index — {len(pages)} pages\n",
-            f"> Last compiled: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n",
+            f"> Last compiled: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}\n",
             "---\n",
             "## Pages\n",
         ]
         for p in sorted(pages, key=lambda x: x["title"]):
-            safe = p["title"].lower().replace(" ", "-").replace("/", "-")
             lines.append(f"- [[{p['title']}]] — {p['sources']} sources, {p['memories']} related memories")
-        lines.append("")
-        lines.append("---\n")
-        lines.append("*Amnis Wiki Compiler v0.1.0*\n")
+        lines += ["", "---\n", f"*Amnis Wiki Compiler v{_version()}*\n"]
+        try:
+            (config.wiki_dir / "index.md").write_text("\n".join(lines), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not write wiki index: %s", exc)
 
-        (config.wiki_dir / "index.md").write_text("\n".join(lines), encoding="utf-8")
+    # ─── inspection ────────────────────────────────────────────────────
+
+    def pages(self, search: str = "", limit: int = 500) -> list[dict]:
+        from ..memory.store import escape_like
+
+        with session_scope() as session:
+            q = session.query(WikiPage)
+            if search:
+                like = f"%{escape_like(search)}%"
+                q = q.filter(WikiPage.title.ilike(like, escape="\\"))
+            rows = q.order_by(WikiPage.title).limit(limit).all()
+            return [
+                {
+                    "id": p.id,
+                    "title": p.title,
+                    "summary": (p.summary or "")[:200],
+                    "sources": p.sources or [],
+                    "related": p.related or [],
+                    "tags": p.tags or [],
+                    "last_compiled": p.last_compiled.isoformat() if p.last_compiled else None,
+                    "version": p.version,
+                }
+                for p in rows
+            ]
+
+    def get_page(self, page_id: str) -> dict | None:
+        with session_scope() as session:
+            p = session.query(WikiPage).filter(WikiPage.id == page_id).first()
+            if p is None:
+                return None
+            return {
+                "id": p.id,
+                "title": p.title,
+                "content": p.content,
+                "summary": p.summary,
+                "sources": p.sources or [],
+                "related": p.related or [],
+                "tags": p.tags or [],
+                "last_compiled": p.last_compiled.isoformat() if p.last_compiled else None,
+                "version": p.version,
+            }
 
     def lint(self) -> dict:
-        """Check wiki for issues: missing pages, stale content, broken refs."""
-        issues = []
-        session = get_session()
-        try:
+        """Report stale pages, sourceless pages, and duplicate titles."""
+        issues: list[dict] = []
+        now = datetime.now(UTC)
+
+        with session_scope() as session:
             pages = session.query(WikiPage).all()
             for page in pages:
-                # Check for stale content (older than 30 days)
-                age = (datetime.now(timezone.utc) - page.last_compiled).days
-                if age > 30:
-                    issues.append({
-                        "page": page.title,
-                        "issue": "stale",
-                        "detail": f"Last compiled {age} days ago",
-                    })
-
-                # Check for missing sources
+                if page.last_compiled:
+                    age = (now - page.last_compiled).days
+                    if age > 30:
+                        issues.append(
+                            {
+                                "page": page.title,
+                                "issue": "stale",
+                                "detail": f"Last compiled {age} days ago",
+                            }
+                        )
                 if not page.sources:
-                    issues.append({
-                        "page": page.title,
-                        "issue": "no_sources",
-                        "detail": "Page has no source references",
-                    })
-        finally:
-            session.close()
+                    issues.append(
+                        {
+                            "page": page.title,
+                            "issue": "no_sources",
+                            "detail": "Page has no source references",
+                        }
+                    )
 
-        return {
-            "pages_checked": len(pages) if 'pages' in dir() else 0,
-            "issues_found": len(issues),
-            "issues": issues,
-        }
-
-    def query(self, question: str) -> dict:
-        """Ask the wiki a question — searches across all pages."""
-        # First try RAG
-        rag_results = rag_engine.search(question, limit=5)
-
-        # Then search wiki pages in DB
-        session = get_session()
-        try:
-            like = f"%{question}%"
-            wiki_matches = (
-                session.query(WikiPage)
-                .filter(
-                    WikiPage.content.ilike(like) | WikiPage.title.ilike(like)
-                )
-                .limit(5)
+            duplicates = (
+                session.query(WikiPage.title, func.count(WikiPage.id))
+                .group_by(WikiPage.title)
+                .having(func.count(WikiPage.id) > 1)
                 .all()
             )
-        finally:
-            session.close()
+            for title, n in duplicates:
+                issues.append(
+                    {
+                        "page": title,
+                        "issue": "duplicate_title",
+                        "detail": f"{n} pages share this title (pre-0.2 data)",
+                    }
+                )
+
+            checked = len(pages)
+
+        return {"pages_checked": checked, "issues_found": len(issues), "issues": issues}
+
+    def query(self, question: str) -> dict:
+        """Answer a question from wiki pages plus RAG hits.
+
+        Matching is per-term. The old implementation searched for the whole
+        question as one substring, so anything phrased as a sentence matched
+        nothing.
+        """
+        from ..memory.store import escape_like
+
+        terms = [t for t in re.findall(r"[\w']+", question.lower()) if len(t) > 2 and t not in _STOP_WORDS][
+            :8
+        ]
+
+        rag_results = self._retrieve(question, limit=5)
+
+        with session_scope() as session:
+            q = session.query(WikiPage)
+            if terms:
+                from sqlalchemy import or_
+
+                clauses = []
+                for t in terms:
+                    like = f"%{escape_like(t)}%"
+                    clauses.append(WikiPage.title.ilike(like, escape="\\"))
+                    clauses.append(WikiPage.content.ilike(like, escape="\\"))
+                q = q.filter(or_(*clauses))
+            matches = q.limit(5).all()
+            wiki_pages = [
+                {
+                    "id": w.id,
+                    "title": w.title,
+                    "summary": w.summary,
+                    "sources": w.sources or [],
+                }
+                for w in matches
+            ]
 
         return {
             "question": question,
+            "terms": terms,
             "rag_results": rag_results[:3],
-            "wiki_pages": [
-                {"title": w.title, "summary": w.summary, "sources": w.sources}
-                for w in wiki_matches
-            ],
+            "wiki_pages": wiki_pages,
         }
 
     def stats(self) -> dict:
-        """Get wiki statistics."""
-        session = get_session()
-        try:
-            count = session.query(WikiPage).count()
-            total_sources = session.query(WikiPage.sources).count()
-            return {
-                "total_pages": count,
-                "total_sources": total_sources,
-                "wiki_dir": str(config.wiki_dir),
-            }
-        finally:
-            session.close()
+        """Page count and *distinct* source count.
+
+        0.1 reported ``query(WikiPage.sources).count()`` as "total_sources",
+        which is just the number of rows — always equal to total_pages.
+        """
+        with session_scope() as session:
+            total_pages = session.query(func.count(WikiPage.id)).scalar() or 0
+            all_sources: set[str] = set()
+            for (sources,) in session.query(WikiPage.sources).all():
+                all_sources.update(sources or [])
+            newest = session.query(func.max(WikiPage.last_compiled)).scalar()
+            avg_version = session.query(func.avg(WikiPage.version)).scalar() or 0
+
+        return {
+            "total_pages": int(total_pages),
+            "total_sources": len(all_sources),
+            "avg_version": round(float(avg_version), 1),
+            "last_compiled": newest.isoformat() if newest else None,
+            "wiki_dir": str(config.wiki_dir),
+        }
 
 
-compiler = WikiCompiler()
+def _version() -> str:
+    from .. import __version__
+
+    return __version__
+
+
+# ─── Lazy singleton ────────────────────────────────────────────────────
+
+_compiler: WikiCompiler | None = None
+
+
+def get_compiler() -> WikiCompiler:
+    global _compiler
+    if _compiler is None:
+        _compiler = WikiCompiler()
+    return _compiler
+
+
+def reset_compiler() -> None:
+    global _compiler
+    _compiler = None
+
+
+def __getattr__(name: str):
+    if name == "compiler":
+        return get_compiler()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

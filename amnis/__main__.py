@@ -1,261 +1,445 @@
-"""Amnis CLI — run the MCP server or execute one-off commands.
+"""Amnis command line interface.
 
-Usage:
-  python -m amnis                     # Run MCP server (default)
-  python -m amnis server              # Same — run MCP server
-  python -m amnis remember <fact>     # Store a memory
-  python -m amnis recall <query>      # Recall memories
-  python -m amnis search <query>      # RAG semantic search
-  python -m amnis hybrid-search <query>  # Hybrid semantic + keyword search
-  python -m amnis index <path>        # Index a file
-  python -m amnis index-notes         # Index all notes in notes directory
-  python -m amnis index-wiki           # Index all wiki files into ChromaDB (vault sync)
-  python -m amnis compile-wiki        # Compile wiki
-  python -m amnis status              # Show all stats
-  python -m amnis init                # Initialize (create dirs, index notes)
-  python -m amnis episodic-log        # Log an episode (session role content)
-  python -m amnis episodic-recall     # Recall episodes
-  python -m amnis episodic-prune      # Prune old episodes
-  python -m amnis prune               # Run memory pruning (--dry-run to preview)
-  python -m amnis rag-stats           # RAG engine + keyword index stats
+The 0.1 CLI parsed ``sys.argv`` by hand and joined every remaining token into
+the payload, so::
+
+    amnis remember "I use fish" --importance 9
+
+stored the literal text ``I use fish --importance 9`` at the default
+importance. Flags are real flags now, every subcommand documents itself, and
+``--json`` is available on all of them for scripting.
 """
-import sys
+
+from __future__ import annotations
+
+import argparse
 import json
-from pathlib import Path
-
-# Ensure amnis is importable when run from anywhere
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import sys
+from typing import Any
 
 
-def print_json(data):
-    print(json.dumps(data, indent=2, default=str))
-
-
-def main():
-    args = sys.argv[1:]
-
-    if not args or args[0] == "server":
-        from .server.mcp import main as run_server
-        import asyncio
-        asyncio.run(run_server())
-
-    elif args[0] == "remember":
-        from .memory import store
-        fact = " ".join(args[1:])
-        if not fact:
-            print("Usage: python -m amnis remember <fact> [--category X] [--importance N]")
-            return
-        result = store.store(fact=fact)
-        print_json(result)
-
-    elif args[0] == "recall":
-        from .memory import store
-        query = " ".join(args[1:]) if len(args) > 1 else ""
-        results = store.recall(query=query)
-        print_json(results)
-
-    elif args[0] == "search":
-        from .rag.engine import engine
-        query = " ".join(args[1:])
-        if not query:
-            print("Usage: python -m amnis search <query>")
-            return
-        results = engine.search(query=query)
-        print_json(results)
-
-    elif args[0] in ("hybrid-search", "hybrid_search"):
-        from .rag.engine import engine
-        query = " ".join(args[1:])
-        if not query:
-            print("Usage: python -m amnis hybrid-search <query> [--weight 0.7]")
-            return
-        weight = 0.7
-        if "--weight" in args:
-            try:
-                idx = args.index("--weight")
-                weight = float(args[idx + 1])
-            except (ValueError, IndexError):
-                pass
-        results = engine.hybrid_search(query=query, semantic_weight=weight)
-        print_json(results)
-
-    elif args[0] == "index":
-        if len(args) < 2:
-            print("Usage: python -m amnis index <file_path>")
-            return
-        from .rag.engine import engine
-        result = engine.index_file(args[1])
-        print_json(result)
-
-    elif args[0] == "index-notes":
-        from .rag.engine import engine
-        result = engine.index_notes()
-        print_json(result)
-
-    elif args[0] in ("index-vault",):
-        # Legacy alias — redirect to index-notes
-        from .rag.engine import engine
-        result = engine.index_notes()
-        print_json(result)
-
-    elif args[0] == "compile-wiki":
-        from .wiki.compiler import compiler
-        topics = args[1:] if len(args) > 1 else None
-        result = compiler.compile(topics=topics)
-        print_json(result)
-
-    elif args[0] in ("index-wiki", "index_wiki"):
-        from .rag.engine import engine
-        result = engine.index_wiki()
-        print_json(result)
-
-    elif args[0] == "status":
-        from .memory import store as memory_store
-        from .rag.engine import engine as rag_engine
-        from .wiki.compiler import compiler as wiki_compiler
-        from .memory import episodic as memory_episodic
-        from .config import config
-        print(json.dumps({
-            "memory": memory_store.stats(),
-            "rag": rag_engine.stats(),
-            "wiki": wiki_compiler.stats(),
-            "episodic": memory_episodic.stats(),
-            "config": {
-                "notes_dir": str(config.notes_dir),
-                "data_dir": str(config.data_dir),
-                "embedding_model": config.embedding_model,
-            },
-        }, indent=2))
-
-    elif args[0] == "rag-stats":
-        from .rag.engine import engine
-        print_json(engine.stats())
-
-    elif args[0] == "episodic-log":
-        from .memory import episodic as memory_episodic
-        if len(args) < 4:
-            print("Usage: python -m amnis episodic-log <session_id> <role> <content> [--summary X] [--topics A,B,C]")
-            return
-        session_id = args[1]
-        role = args[2]
-        content = " ".join(args[3:])
-        # Extract --summary and --topics from content if present
-        summary = None
-        topics = None
-        if "--summary" in args:
-            idx = args.index("--summary")
-            summary_parts = []
-            for s in args[idx + 1:]:
-                if s.startswith("--"):
-                    break
-                summary_parts.append(s)
-            summary = " ".join(summary_parts)
-        if "--topics" in args:
-            idx = args.index("--topics")
-            try:
-                topics_str = args[idx + 1]
-                topics = [t.strip() for t in topics_str.split(",") if t.strip()]
-            except IndexError:
-                pass
-        result = memory_episodic.log_episode(
-            session_id=session_id, role=role, content=content,
-            summary=summary, topics=topics,
-        )
-        print_json(result)
-
-    elif args[0] == "episodic-recall":
-        from .memory import episodic as memory_episodic
-        session_id = None
-        topic = None
-        role = None
-        limit = 20
-        # Parse flags
-        if "--session" in args:
-            idx = args.index("--session")
-            if idx + 1 < len(args):
-                session_id = args[idx + 1]
-        if "--topic" in args:
-            idx = args.index("--topic")
-            if idx + 1 < len(args):
-                topic = args[idx + 1]
-        if "--role" in args:
-            idx = args.index("--role")
-            if idx + 1 < len(args):
-                role = args[idx + 1]
-        if "--limit" in args:
-            idx = args.index("--limit")
-            if idx + 1 < len(args):
-                try:
-                    limit = int(args[idx + 1])
-                except ValueError:
-                    pass
-        results = memory_episodic.recall_episodes(
-            session_id=session_id, topic=topic, role=role, limit=limit,
-        )
-        print_json(results)
-
-    elif args[0] == "episodic-prune":
-        from .memory import episodic as memory_episodic
-        days = 30
-        if len(args) > 1:
-            try:
-                days = int(args[1])
-            except ValueError:
-                pass
-        count = memory_episodic.prune_old_episodes(days=days)
-        print_json({"pruned": count, "retention_days": days})
-
-    elif args[0] == "prune":
-        from .memory import pruning as memory_pruning
-        dry_run = "--dry-run" in args
-        result = memory_pruning.run_pipeline(dry_run=dry_run)
-        print_json(result)
-
-    elif args[0] == "init":
-        from .memory import store
-        from .rag.engine import engine
-        from .wiki.compiler import compiler
-        from .config import config
-
-        # Create directories
-        config.data_dir.mkdir(parents=True, exist_ok=True)
-        config.wiki_dir.mkdir(parents=True, exist_ok=True)
-        config.chroma_dir.mkdir(parents=True, exist_ok=True)
-
-        print("✅ Directories created")
-        print(f"   Data: {config.data_dir}")
-        print(f"   Wiki: {config.wiki_dir}")
-        print(f"   Chroma: {config.chroma_dir}")
-
-        # Index notes
-        print("\n📚 Indexing notes...")
-        result = engine.index_notes()
-        print(f"   Files: {result.get('files_indexed', 0)}")
-        print(f"   Chunks: {result.get('chunks_indexed', 0)}")
-
-        # Compile wiki
-        print("\n📝 Compiling wiki...")
-        wiki_result = compiler.compile()
-        print(f"   Pages: {wiki_result.get('compiled', 0)}")
-
-        # Store init fact
-        store.store(
-            fact="Amnis memory system initialized on this date",
-            category="meta",
-            importance=1,
-            tags=["amnis", "init"],
-        )
-
-        print("\n✅ Amnis initialized and ready!")
-
-    elif args[0] == "web":
-        from .server.web import main as run_web
-        run_web()
-
+def _print(data: Any, as_json: bool = True) -> None:
+    if as_json:
+        print(json.dumps(data, indent=2, default=str))
     else:
-        print(f"Unknown command: {args[0]}")
-        print("Usage: python -m amnis [server|remember|recall|search|hybrid-search|index|index-notes|index-vault|compile-wiki|status|rag-stats|episodic-log|episodic-recall|episodic-prune|prune|init]")
+        print(data)
+
+
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+# ─── Commands ──────────────────────────────────────────────────────────
+
+
+def cmd_server(args: argparse.Namespace) -> int:
+    from .server.mcp import main as run_mcp
+
+    run_mcp()
+    return 0
+
+
+def cmd_web(args: argparse.Namespace) -> int:
+    from .config import config
+
+    if args.host:
+        config.host = args.host
+    if args.port:
+        config.port = args.port
+    from .server.web import main as run_web
+
+    run_web()
+    return 0
+
+
+def cmd_remember(args: argparse.Namespace) -> int:
+    from .memory import store
+
+    result = store.store(
+        fact=args.fact,
+        category=args.category,
+        importance=args.importance,
+        source=args.source,
+        tags=args.tags,
+        context=args.context,
+        expiry=args.expiry,
+    )
+    _print(result, args.json)
+    return 0
+
+
+def cmd_recall(args: argparse.Namespace) -> int:
+    from .memory import store
+
+    results = store.recall(
+        query=args.query or "",
+        category=args.category,
+        limit=args.limit,
+        min_importance=args.min_importance,
+        tags=args.tags,
+        semantic=not args.no_semantic,
+    )
+    if args.json:
+        _print(results)
+    elif not results:
+        print("No memories matched.")
+    else:
+        for m in results:
+            print(f"[{m['category']:<10}] ({m['importance']:>2}/10) {m['fact']}")
+            print(f"             {m['id']}  {(m['timestamp'] or '')[:19]}")
+    return 0
+
+
+def cmd_forget(args: argparse.Namespace) -> int:
+    from .memory import store
+
+    deleted = store.forget(args.memory_id)
+    _print({"deleted": deleted, "id": args.memory_id}, args.json)
+    return 0 if deleted else 1
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    from .rag.engine import RagError, get_engine
+
+    engine = get_engine()
+    try:
+        if args.mode == "keyword":
+            results = engine.keyword_search(args.query, limit=args.limit)
+        elif args.mode == "semantic":
+            results = engine.search(args.query, limit=args.limit)
+        else:
+            results = engine.hybrid_search(args.query, limit=args.limit)
+    except RagError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        _print(results)
+    elif not results:
+        print("No results.")
+    else:
+        for r in results:
+            score = r.get("hybrid_score", r.get("score", r.get("rank", "")))
+            print(f"{r.get('search_type', '?'):<9} {score}  {r.get('source', '')}")
+            print(f"  {r.get('content', '')[:200]}")
+    return 0
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    from .rag.engine import RagError, get_engine
+
+    try:
+        result = get_engine().index_file(args.path, origin=args.origin)
+    except RagError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    _print(result, args.json)
+    return 0
+
+
+def cmd_index_notes(args: argparse.Namespace) -> int:
+    from .rag.engine import get_engine
+
+    _print(get_engine().index_notes(), args.json)
+    return 0
+
+
+def cmd_index_wiki(args: argparse.Namespace) -> int:
+    from .rag.engine import get_engine
+
+    _print(get_engine().index_wiki(), args.json)
+    return 0
+
+
+def cmd_reindex(args: argparse.Namespace) -> int:
+    from .memory import store
+
+    _print(store.reindex_keywords(), args.json)
+    return 0
+
+
+def cmd_compile_wiki(args: argparse.Namespace) -> int:
+    from .wiki.compiler import get_compiler
+
+    _print(get_compiler().compile(topics=args.topics or None), args.json)
+    return 0
+
+
+def cmd_wiki_query(args: argparse.Namespace) -> int:
+    from .wiki.compiler import get_compiler
+
+    _print(get_compiler().query(args.question), args.json)
+    return 0
+
+
+def cmd_wiki_lint(args: argparse.Namespace) -> int:
+    from .wiki.compiler import get_compiler
+
+    result = get_compiler().lint()
+    _print(result, args.json)
+    return 1 if result["issues_found"] else 0
+
+
+def cmd_consolidate(args: argparse.Namespace) -> int:
+    from .memory import consolidation
+
+    _print(consolidation.run_pipeline(), args.json)
+    return 0
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    from .memory import pruning
+
+    _print(pruning.run_pipeline(dry_run=args.dry_run), args.json)
+    return 0
+
+
+def cmd_episodic_log(args: argparse.Namespace) -> int:
+    from .memory import episodic
+
+    _print(
+        episodic.log_episode(
+            session_id=args.session_id,
+            role=args.role,
+            content=args.content,
+            summary=args.summary,
+            topics=args.topics,
+            outcome=args.outcome,
+        ),
+        args.json,
+    )
+    return 0
+
+
+def cmd_episodic_recall(args: argparse.Namespace) -> int:
+    from .memory import episodic
+
+    _print(
+        episodic.recall_episodes(
+            session_id=args.session_id,
+            topic=args.topic,
+            role=args.role,
+            limit=args.limit,
+        ),
+        args.json,
+    )
+    return 0
+
+
+def cmd_episodic_prune(args: argparse.Namespace) -> int:
+    from .memory import episodic
+
+    _print({"pruned": episodic.prune_old_episodes(days=args.days), "retention_days": args.days}, args.json)
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    from .config import config, unknown_env_vars
+    from .memory import episodic
+    from .memory import store as memory_store
+
+    report: dict[str, Any] = {"errors": {}}
+    for name, fn in (("memory", memory_store.stats), ("episodic", episodic.stats)):
+        try:
+            report[name] = fn()
+        except Exception as exc:  # noqa: BLE001 - degraded reporting
+            report[name] = {}
+            report["errors"][name] = str(exc)
+    try:
+        from .rag.engine import get_engine
+
+        report["rag"] = get_engine().stats()
+    except Exception as exc:  # noqa: BLE001
+        report["rag"] = {}
+        report["errors"]["rag"] = str(exc)
+    try:
+        from .wiki.compiler import get_compiler
+
+        report["wiki"] = get_compiler().stats()
+    except Exception as exc:  # noqa: BLE001
+        report["wiki"] = {}
+        report["errors"]["wiki"] = str(exc)
+
+    report["status"] = "degraded" if report["errors"] else "ok"
+    report["config"] = {
+        "data_dir": str(config.data_dir),
+        "notes_dir": str(config.notes_dir),
+        "wiki_dir": str(config.wiki_dir),
+        "memory_db": str(config.memory_db),
+        "embedding_model": config.embedding_model,
+    }
+    unknown = unknown_env_vars()
+    if unknown:
+        report["config"]["ignored_env_vars"] = unknown
+
+    if args.json:
+        _print(report)
+    else:
+        print(f"Amnis: {report['status']}")
+        print(f"  Memories  {report['memory'].get('total_memories', 0)}")
+        print(
+            f"  Chunks    {report['rag'].get('total_chunks', 0)} "
+            f"from {report['rag'].get('unique_sources', 0)} sources"
+        )
+        print(f"  Wiki      {report['wiki'].get('total_pages', 0)} pages")
+        print(f"  Episodes  {report['episodic'].get('total_episodes', 0)}")
+        print(f"  Data dir  {config.data_dir}")
+        for layer, message in report["errors"].items():
+            print(f"  ! {layer}: {message}", file=sys.stderr)
+        for var in unknown:
+            print(f"  ! ignoring unknown env var {var}", file=sys.stderr)
+    return 1 if report["errors"] else 0
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from .config import config
+    from .rag.engine import get_engine
+    from .wiki.compiler import get_compiler
+
+    for directory in (
+        config.data_dir,
+        config.notes_dir,
+        config.wiki_dir,
+        config.wiki_facts_dir,
+        config.chroma_dir,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+    print("Directories ready:")
+    print(f"  data  {config.data_dir}")
+    print(f"  notes {config.notes_dir}")
+    print(f"  wiki  {config.wiki_dir}")
+
+    print("\nIndexing notes...")
+    result = get_engine().index_notes()
+    print(f"  {result.get('files_indexed', 0)} files, {result.get('chunks_indexed', 0)} chunks")
+
+    if not args.skip_wiki:
+        print("\nCompiling wiki...")
+        wiki_result = get_compiler().compile()
+        print(f"  {wiki_result.get('compiled', 0)} pages")
+
+    print("\nAmnis is ready. Try: amnis status")
+    return 0
+
+
+# ─── Parser ────────────────────────────────────────────────────────────
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="amnis",
+        description="Persistent memory, RAG, and wiki compilation for AI agents.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Run `amnis <command> --help` for per-command options.",
+    )
+    from . import __version__
+
+    parser.add_argument("--version", action="version", version=f"amnis {__version__}")
+    parser.add_argument("--json", action="store_true", help="always emit JSON")
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
+
+    def add(name: str, func, help_text: str, **kwargs):
+        p = sub.add_parser(name, help=help_text, description=help_text, **kwargs)
+        p.set_defaults(func=func)
+        return p
+
+    add("server", cmd_server, "Run the MCP server over stdio (default).")
+
+    p = add("web", cmd_web, "Run the web dashboard.")
+    p.add_argument("--host", help="bind address (default: from config)")
+    p.add_argument("--port", type=int, help="port (default: from config)")
+
+    p = add("remember", cmd_remember, "Store a fact.")
+    p.add_argument("fact")
+    p.add_argument(
+        "-c",
+        "--category",
+        default="general",
+        choices=["preference", "fact", "event", "procedure", "concept", "theme", "meta", "general"],
+    )
+    p.add_argument("-i", "--importance", type=int, default=5, choices=range(1, 11), metavar="1-10")
+    p.add_argument("-t", "--tags", type=_csv, default=None, help="comma-separated")
+    p.add_argument("--context")
+    p.add_argument("--source", default="cli")
+    p.add_argument("--expiry", help="ISO-8601 timestamp after which the fact expires")
+
+    p = add("recall", cmd_recall, "Recall memories by meaning and keyword.")
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("-c", "--category")
+    p.add_argument("-n", "--limit", type=int, default=10)
+    p.add_argument("-m", "--min-importance", type=int, default=0)
+    p.add_argument("-t", "--tags", type=_csv, default=None)
+    p.add_argument("--no-semantic", action="store_true", help="keyword search only")
+
+    p = add("forget", cmd_forget, "Delete a memory by ID.")
+    p.add_argument("memory_id")
+
+    p = add("search", cmd_search, "Search indexed documents.")
+    p.add_argument("query")
+    p.add_argument("-n", "--limit", type=int, default=5)
+    p.add_argument("--mode", choices=["hybrid", "semantic", "keyword"], default="hybrid")
+
+    p = add("index", cmd_index, "Index a single file.")
+    p.add_argument("path")
+    p.add_argument("--origin", default="note", choices=["note", "wiki", "memory", "compiled"])
+
+    add("index-notes", cmd_index_notes, "Index every note in the notes directory.")
+    add("index-wiki", cmd_index_wiki, "Index the wiki directory.")
+    add("reindex", cmd_reindex, "Rebuild the memory keyword index (run once after upgrading from 0.1).")
+
+    p = add("compile-wiki", cmd_compile_wiki, "Compile wiki pages.")
+    p.add_argument("topics", nargs="*", help="specific topics (default: all)")
+
+    p = add("wiki-query", cmd_wiki_query, "Ask the wiki a question.")
+    p.add_argument("question")
+
+    add("wiki-lint", cmd_wiki_lint, "Report stale, sourceless, or duplicate wiki pages.")
+    add("consolidate", cmd_consolidate, "Extract facts from recent logs, then reflect.")
+
+    p = add("prune", cmd_prune, "Decay, deduplicate, and prune the memory store.")
+    p.add_argument("--dry-run", action="store_true", help="report without deleting")
+
+    p = add("episodic-log", cmd_episodic_log, "Log a conversation turn.")
+    p.add_argument("session_id")
+    p.add_argument("role", choices=["user", "assistant"])
+    p.add_argument("content")
+    p.add_argument("--summary")
+    p.add_argument("--topics", type=_csv, default=None)
+    p.add_argument("--outcome", choices=["success", "failure", "neutral"])
+
+    p = add("episodic-recall", cmd_episodic_recall, "Recall logged turns.")
+    p.add_argument("--session-id")
+    p.add_argument("--topic")
+    p.add_argument("--role", choices=["user", "assistant"])
+    p.add_argument("-n", "--limit", type=int, default=20)
+
+    p = add("episodic-prune", cmd_episodic_prune, "Delete episodes past the retention window.")
+    p.add_argument("--days", type=int, default=30)
+
+    add("status", cmd_status, "Show the health and size of every layer.")
+
+    p = add("init", cmd_init, "Create directories, index notes, compile the wiki.")
+    p.add_argument("--skip-wiki", action="store_true")
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if not getattr(args, "command", None):
+        # No subcommand: run the MCP server, matching how agent hosts spawn it.
+        return cmd_server(args)
+
+    try:
+        return args.func(args) or 0
+    except KeyboardInterrupt:
+        return 130
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

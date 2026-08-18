@@ -28,9 +28,12 @@ Thumbs.db
 # Systemd user service (user-specific paths)
 amnis-web.service
 
-# Test files (personal test data)
-test_amnis.py
-test_mcp.py
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
 # Personal analysis scripts (not part of the app)
 check_memories.py

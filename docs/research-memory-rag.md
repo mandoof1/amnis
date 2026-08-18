@@ -142,7 +142,8 @@ Both `amnis_search` and `amnis_hybrid_search` support optional `where` metadata 
 
 **Memory Consolidation (Section 3.1, Section 2.3):**
 The `amnis/memory/consolidation.py` module runs as a background pipeline:
-1. Scans recent conversation logs for assistant utterances mentioning "you" (LO's knowledge about the user)
+1. Scans recent conversation logs for assistant utterances that read as durable statements about the user
+   (declarative "you prefer / you use / your X is" patterns, with advice, questions, list items and code rejected)
 2. Extracts structured `MemoryFact` records with computed importance scores
 3. Contradiction detection via polarity scoring — facts with opposite sentiment on the same topic are flagged and both have confidence reduced
 4. Semantic dedup via cosine similarity — near-identical facts are merged (longer/more specific version wins, importance boosted)

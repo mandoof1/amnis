@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main, hardening]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # The test suite stubs out the vector layer, so the heavy optional
+          # stack (torch, chromadb) is not needed to run it.
+          pip install -e . --no-deps
+          pip install pytest ruff fastapi "pydantic-settings>=2" sqlalchemy httpx "mcp>=1.9" uvicorn
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+      - name: Test
+        run: pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Every subpackage must be present in the wheel
+        run: |
+          python - <<'PY'
+          import pathlib, zipfile, sys
+          wheel = next(pathlib.Path("dist").glob("*.whl"))
+          names = set(zipfile.ZipFile(wheel).namelist())
+          required = [
+              "amnis/__init__.py", "amnis/__main__.py",
+              "amnis/memory/store.py", "amnis/rag/engine.py",
+              "amnis/rag/keyword.py", "amnis/wiki/compiler.py",
+              "amnis/server/mcp.py", "amnis/server/web.py",
+              "amnis/server/ui.html",
+          ]
+          missing = [n for n in required if n not in names]
+          if missing:
+              sys.exit("missing from wheel: " + ", ".join(missing))
+          print(f"{wheel.name}: all {len(required)} required files present")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amnis-wheel
+          path: dist/*.whl

@@ -1,6 +1,6 @@
 # Amnis — Memory, RAG & Wiki for Hermes Agent
 
-Use this skill when you need to remember something across sessions, search LO's knowledge base, or compile structured knowledge.
+Use this skill when you need to remember something across sessions, search the user's knowledge base, or compile structured knowledge.
 
 ## Tools Available (via MCP server)
 
@@ -30,15 +30,15 @@ Use this skill when you need to remember something across sessions, search LO's 
 
 | Situation | Tool |
 |---|---|
-| LO tells you something about himself | `amnis_remember` — category=preference/fact, importance=7-10 |
+| The user tells you something about themselves | `amnis_remember` — category=preference/fact, importance=7-10 |
 | You need to recall past context | `amnis_recall` — search by keyword |
-| LO asks about something in his notes | `amnis_search` — semantic search |
+| The user asks about something in their notes | `amnis_search` — semantic search |
 | You need compiled knowledge on a topic | `amnis_wiki_query` or `amnis_compile_wiki` |
 | End of a session | `amnis_consolidate` to extract facts from recent chat |
 
 ## Category System
-- `preference` — LO's likes, dislikes, habits
-- `fact` — things learned about LO, his setup, his work
+- `preference` — the user's likes, dislikes, habits
+- `fact` — things learned about the user, their setup, their work
 - `event` — things that happened
 - `procedure` — how to do things
 - `concept` — domain knowledge
@@ -46,9 +46,9 @@ Use this skill when you need to remember something across sessions, search LO's 
 
 ## Best Practices
 
-1. **Store immediately** — when LO tells you something, call `amnis_remember` right away
+1. **Store immediately** — when the user tells you something, call `amnis_remember` right away
 2. **Be specific** — include context in the fact, not just bare info
 3. **Use tags** — tag with project names, topics, people
 4. **Consolidate periodically** — run `amnis_consolidate` at end of sessions
 5. **Compile wiki** — run `amnis_compile_wiki` after significant new content is added
-6. **Check first** — before asking LO something you should know, run `amnis_recall` to check your memory
+6. **Check first** — before asking the user something you should know, run `amnis_recall` to check your memory

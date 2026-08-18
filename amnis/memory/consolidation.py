@@ -1,198 +1,236 @@
-"""Memory consolidation — extract structured facts from episodic logs.
+"""Consolidation — promote episodic logs into durable semantic facts.
 
-Based on findings from the Memory AI + RAG deep research (CoALA framework,
-Generative Agents paper, Stanford 2023):
-  - Consolidation is critical for memory quality (removing reflection broke emergent behaviors)
-  - Semantic + episodic memory should be distinct layers
-  - Contradiction resolution and deduplication prevent memory corruption
+Three substantive changes from 0.1:
 
-This module uses sentence embeddings for semantic similarity (reuses existing
-all-MiniLM-L6-v2 from the RAG engine — no extra deps) and lightweight NLP
-heuristics for contradiction detection.
+* **Extraction is no longer "any line containing 'you'".** That heuristic
+  swallowed instructions ("You should restart the daemon"), questions, list
+  items and code, then stored them as permanent facts about the user. Lines
+  now have to look like a declarative statement *about* the user, and an
+  explicit reject list drops advice, conditionals and markup.
+* **Similarity is vectorised.** The old ``_cosine_sim`` was a Python loop over
+  384 floats, called O(n²) times, and re-embedded every stored fact for every
+  candidate line. Facts are embedded once per run into a normalised matrix, so
+  a comparison is one dot product.
+* **``reflect()`` compares themes to themes.** It used to check a candidate
+  theme against the observation pool, which by construction never contains
+  themes — so the "already exists" branch was unreachable and every run added
+  another near-identical theme.
+
+``set_extractor()`` / ``set_synthesiser()` let a local LLM replace the
+heuristics without touching this module.
 """
+
+from __future__ import annotations
+
+import logging
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
 
-from sqlalchemy import func, desc
+import numpy as np
+from sqlalchemy import desc
 
 from ..config import config
-from ..database import get_session, ConversationLog, MemoryFact
+from ..database import ConversationLog, MemoryFact, session_scope
 
+logger = logging.getLogger(__name__)
 
-# ─── Sentence Embedder (lazy, shared with RAG engine) ──────────────────
+# ─── Embedding ─────────────────────────────────────────────────────────
 
 _embedder = None
 
+
 def _get_embedder():
-    """Lazy-load sentence embedder (reuses same model as RAG engine)."""
     global _embedder
     if _embedder is None:
         from sentence_transformers import SentenceTransformer
+
         _embedder = SentenceTransformer(config.embedding_model)
     return _embedder
 
 
-def _embed(texts: list[str]) -> list[list[float]]:
-    """Embed a list of texts, returning list of float vectors."""
-    model = _get_embedder()
-    embeddings = model.encode(texts, show_progress_bar=False)
-    return embeddings.tolist()
+def _embed(texts: list[str]) -> np.ndarray:
+    """Embed texts as an L2-normalised float32 matrix.
+
+    Normalising once means cosine similarity is a plain dot product, so the
+    whole comparison collapses to a single matrix multiply.
+    """
+    if not texts:
+        return np.zeros((0, config.embedding_dimension), dtype=np.float32)
+    vectors = np.asarray(_get_embedder().encode(texts, show_progress_bar=False), dtype=np.float32)
+    if vectors.ndim == 1:
+        vectors = vectors.reshape(1, -1)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return vectors / norms
 
 
-def _cosine_sim(a: list[float], b: list[float]) -> float:
-    """Cosine similarity between two vectors."""
-    dot = sum(x * y for x, y in zip(a, b))
-    na = sum(x * x for x in a) ** 0.5
-    nb = sum(x * x for x in b) ** 0.5
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+def _similarities(vector: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Cosine similarity of one normalised vector against a normalised matrix."""
+    if matrix.shape[0] == 0:
+        return np.zeros(0, dtype=np.float32)
+    return matrix @ vector
 
 
-# ─── Contradiction Detection ───────────────────────────────────────────
+# ─── Fact-shape heuristics ─────────────────────────────────────────────
 
-# Simple negation indicators — words that flip the meaning of a statement
+# A line has to look like a statement *about the user* to be a candidate.
+_FACT_PATTERNS = [
+    re.compile(
+        r"\byou (?:prefer|use|run|like|love|hate|work|own|have|need|want|always|never|usually)\b", re.I
+    ),
+    re.compile(r"\byou'?re\s+(?:a|an|the|using|running|working)\b", re.I),
+    re.compile(r"\byou'?ve\s+(?:got|been|set|chosen)\b", re.I),
+    re.compile(r"\byour\s+(?:\w+\s+){1,3}(?:is|are|was|were|uses|runs|lives|sits)\b", re.I),
+]
+
+# ...and must not look like advice, a question, a step, or markup.
+_REJECT_PATTERNS = [
+    re.compile(r"\byou (?:should|could|can|might|may|must|will|would|shall)\b", re.I),
+    re.compile(r"^\s*(?:if|when|unless|whenever|once|after|before)\b", re.I),
+    re.compile(r"\b(?:do|did|are|is|can|will|would|should|have|has) you\b", re.I),
+    re.compile(r"^\s*[-*+>]\s"),  # markdown list item / quote
+    re.compile(r"^\s*\d+[.)]\s"),  # numbered step
+    re.compile(r"^\s*(?:```|~~~|\||#{1,6}\s)"),  # code fence, table, heading
+    re.compile(r"^\s*(?:let me|i'?ll|i will|i can|here'?s|note that|for example)\b", re.I),
+    re.compile(r"\b(?:TODO|FIXME|NOTE):", re.I),
+]
+
+
+def looks_like_fact(line: str) -> bool:
+    """True if the line reads as a durable statement about the user."""
+    line = line.strip()
+    if len(line) < config.consolidation_min_line_length:
+        return False
+    if line.endswith("?") or line.endswith(":"):
+        return False
+    if any(p.search(line) for p in _REJECT_PATTERNS):
+        return False
+    return any(p.search(line) for p in _FACT_PATTERNS)
+
+
+# Pluggable hooks — swap in an LLM without editing this module.
+_extractor: Callable[[str], list[str]] | None = None
+_synthesiser: Callable[[list[str]], str] | None = None
+
+
+def set_extractor(fn: Callable[[str], list[str]] | None) -> None:
+    """Replace fact extraction. ``fn(content) -> list[fact strings]``."""
+    global _extractor
+    _extractor = fn
+
+
+def set_synthesiser(fn: Callable[[list[str]], str] | None) -> None:
+    """Replace theme synthesis. ``fn(list[fact strings]) -> theme string``."""
+    global _synthesiser
+    _synthesiser = fn
+
+
+def extract_candidates(content: str) -> list[str]:
+    if _extractor is not None:
+        return [c.strip() for c in _extractor(content) if c and c.strip()]
+    return [line.strip() for line in (content or "").split("\n") if looks_like_fact(line)]
+
+
+# ─── Polarity / contradiction ──────────────────────────────────────────
+
 _NEGATION_WORDS = {
-    "not", "never", "no", "don't", "doesn't", "didn't", "won't",
-    "wouldn't", "couldn't", "shouldn't", "isn't", "aren't", "wasn't",
-    "weren't", "haven't", "hasn't", "hadn't", "can't", "cannot",
-    "without", "dislike", "hates", "refuses", "rejects", "avoids",
+    "not",
+    "never",
+    "no",
+    "don't",
+    "doesn't",
+    "didn't",
+    "won't",
+    "wouldn't",
+    "couldn't",
+    "shouldn't",
+    "isn't",
+    "aren't",
+    "wasn't",
+    "weren't",
+    "haven't",
+    "hasn't",
+    "hadn't",
+    "can't",
+    "cannot",
+    "without",
 }
-
-# Positive/negative polarity words for basic sentiment
+# Both base and third-person forms: consolidation sees "you love X" as often
+# as "he loves X", and matching only one form halved the signal.
 _POSITIVE_WORDS = {
-    "likes", "loves", "enjoys", "prefers", "wants", "uses", "does",
-    "has", "works", "good", "great", "excellent", "amazing", "wonderful",
+    "like",
+    "likes",
+    "love",
+    "loves",
+    "enjoy",
+    "enjoys",
+    "prefer",
+    "prefers",
+    "want",
+    "wants",
+    "use",
+    "uses",
+    "has",
+    "have",
+    "work",
+    "works",
+    "good",
+    "great",
+    "excellent",
+    "amazing",
+    "wonderful",
 }
 _NEGATIVE_WORDS = {
-    "dislikes", "hates", "refuses", "avoids", "can't", "won't", "bad",
-    "terrible", "awful", "horrible", "broken", "fails",
+    "dislike",
+    "dislikes",
+    "hate",
+    "hates",
+    "refuse",
+    "refuses",
+    "avoid",
+    "avoids",
+    "bad",
+    "terrible",
+    "awful",
+    "horrible",
+    "broken",
+    "break",
+    "fail",
+    "fails",
 }
+
+_WORD_RE = re.compile(r"[a-z']+")
+
+
+def _word_set(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower()))
 
 
 def _polarity(text: str) -> float:
-    """Simple polarity score: 1.0 = positive, -1.0 = negative, 0.0 = neutral."""
-    lower = text.lower()
-    pos_count = sum(1 for w in _POSITIVE_WORDS if w in lower)
-    neg_count = sum(1 for w in _NEGATIVE_WORDS if w in lower)
-    neg_count += sum(1 for w in _NEGATION_WORDS if w in lower) * 0.5
-    total = pos_count + neg_count
-    if total == 0:
-        return 0.0
-    return (pos_count - neg_count) / total
+    """-1.0 negative … 0.0 neutral … 1.0 positive.
+
+    Uses whole-word membership. The old substring test made "has" match
+    "hash", "no" match "notes", and "does" match "doesn't" — so polarity was
+    close to noise.
+    """
+    words = _word_set(text)
+    pos = len(words & _POSITIVE_WORDS)
+    neg = len(words & _NEGATIVE_WORDS) + 0.5 * len(words & _NEGATION_WORDS)
+    total = pos + neg
+    return 0.0 if total == 0 else (pos - neg) / total
 
 
 def _has_negation(text: str) -> bool:
-    """Check if text contains negation words."""
-    lower = text.lower()
-    for w in _NEGATION_WORDS:
-        # Use word boundary check
-        if re.search(r'\b' + re.escape(w) + r'\b', lower):
-            return True
-    return False
+    return bool(_word_set(text) & _NEGATION_WORDS)
 
 
 def _extract_topic(text: str) -> str:
-    """Extract the likely topic from a fact (first noun-ish phrase)."""
-    # Simple heuristic: first 3-5 words after common patterns
-    for prefix in ["you ", "your ", "you're ", "you've "]:
+    for prefix in ("you ", "your ", "you're ", "you've "):
         if text.lower().startswith(prefix):
-            remainder = text[len(prefix):]
-            # Take first ~4 meaningful words as topic
-            words = remainder.split()[:4]
-            return " ".join(words).rstrip(".,!?;:")
-    # Otherwise use first 5 words
-    words = text.split()[:5]
-    return " ".join(words).rstrip(".,!?;:")
-
-
-# ─── Main Functions ────────────────────────────────────────────────────
-
-
-def get_stored_facts(session, limit: int = 200) -> list[MemoryFact]:
-    """Get recent stored facts for dedup/comparison."""
-    return (
-        session.query(MemoryFact)
-        .order_by(desc(MemoryFact.importance), desc(MemoryFact.timestamp))
-        .limit(limit)
-        .all()
-    )
-
-
-def find_similar_fact(
-    fact_text: str,
-    embedding: list[float],
-    existing_facts: list[MemoryFact],
-    threshold: float = config.dedup_similarity_threshold,
-) -> Optional[tuple[MemoryFact, float]]:
-    """Find a similar existing fact above threshold. Returns (fact, similarity)."""
-    # First pass: fast keyword overlap filter to avoid embedding all
-    words = set(fact_text.lower().split())
-    candidates = []
-    for ef in existing_facts:
-        ef_words = set(ef.fact.lower().split())
-        overlap = len(words & ef_words) / max(len(words | ef_words), 1)
-        if overlap > 0.15:  # loose keyword filter
-            candidates.append(ef)
-
-    if not candidates:
-        return None
-
-    # Embed candidates in batch
-    candidate_texts = [c.fact for c in candidates]
-    candidate_embs = _embed(candidate_texts)
-
-    best_sim = 0.0
-    best_fact = None
-    for ef, cemb in zip(candidates, candidate_embs):
-        sim = _cosine_sim(embedding, cemb)
-        if sim > best_sim:
-            best_sim = sim
-            best_fact = ef
-
-    if best_sim >= threshold:
-        return (best_fact, best_sim)
-    return None
-
-
-def check_contradiction(
-    fact_text: str,
-    embedding: list[float],
-    existing_facts: list[MemoryFact],
-    threshold: float = config.contradiction_distance_threshold,
-) -> Optional[MemoryFact]:
-    """Check if new fact contradicts an existing one.
-
-    Two facts contradict if they are semantically similar (> threshold)
-    but have opposite polarity (one positive, one negative).
-    """
-    words = set(fact_text.lower().split())
-    new_polarity = _polarity(fact_text)
-
-    # Quick filter: only check facts with opposite polarity potential
-    candidates = []
-    for ef in existing_facts:
-        ef_words = set(ef.fact.lower().split())
-        overlap = len(words & ef_words) / max(len(words | ef_words), 1)
-        if overlap > 0.1:
-            ef_pol = _polarity(ef.fact)
-            if (new_polarity > 0.3 and ef_pol < -0.3) or (new_polarity < -0.3 and ef_pol > 0.3):
-                candidates.append(ef)
-
-    if not candidates:
-        return None
-
-    candidate_texts = [c.fact for c in candidates]
-    candidate_embs = _embed(candidate_texts)
-
-    for ef, cemb in zip(candidates, candidate_embs):
-        sim = _cosine_sim(embedding, cemb)
-        if sim >= threshold:
-            return ef  # contradiction found
-
-    return None
+            return " ".join(text[len(prefix) :].split()[:4]).rstrip(".,!?;:")
+    return " ".join(text.split()[:5]).rstrip(".,!?;:")
 
 
 def compute_importance(
@@ -201,30 +239,49 @@ def compute_importance(
     is_manual: bool = False,
     source: str = "auto-extracted",
 ) -> int:
-    """Compute importance score (1-10) based on signals.
-
-    Boosts:
-      - Manual storage (user explicit): +2
-      - Contains personal info (setup, preference, name): +1
-      - Fact mentioned repeatedly (access_count): +1 per 3 accesses
-      - Recent (source is current session): +1
-    """
-    importance = 5  # baseline
-
+    """Score 1-10 from explicitness, content signals, and access frequency."""
+    importance = 5
     if is_manual or source == "manual":
-        importance += 2  # user explicitly chose to store this
+        importance += 2
 
-    # Facts about LO's preferences, setup, or identity are more important
-    lower = fact_text.lower()
-    if any(p in lower for p in ["prefer", "use", "work", "like", "have", "run", "setup"]):
+    words = _word_set(fact_text)
+    if words & {
+        "prefer",
+        "prefers",
+        "use",
+        "uses",
+        "work",
+        "works",
+        "like",
+        "likes",
+        "have",
+        "has",
+        "run",
+        "runs",
+        "setup",
+    }:
         importance += 1
-    if any(p in lower for p in ["arch", "linux", "cachyos", "terminal"]):
+    # Domain keywords are configuration, not code. 0.1 hardcoded one user's
+    # personal stack here, which scored every other user's memories wrongly.
+    if config.importance_keywords and words & {k.lower() for k in config.importance_keywords}:
         importance += 1
 
-    # Access frequency boost
-    importance += min(access_count // 3, 2)  # max +2 from frequency
-
+    importance += min(access_count // 3, 2)
     return max(1, min(10, importance))
+
+
+# ─── Main passes ───────────────────────────────────────────────────────
+
+
+def _load_existing(session, limit: int = 300) -> tuple[list[MemoryFact], np.ndarray]:
+    facts = (
+        session.query(MemoryFact)
+        .order_by(desc(MemoryFact.importance), desc(MemoryFact.timestamp))
+        .limit(limit)
+        .all()
+    )
+    matrix = _embed([f.fact[:400] for f in facts]) if facts else _embed([])
+    return facts, matrix
 
 
 def consolidate_recent(
@@ -232,153 +289,153 @@ def consolidate_recent(
     run_dedup: bool = True,
     run_contradiction_check: bool = True,
 ) -> dict:
-    """Scan recent conversation logs and extract actionable facts.
+    """Scan recent assistant turns and promote durable facts into memory."""
+    extracted = 0
+    merged = 0
+    skipped = 0
+    contradictions: list[dict] = []
+    new_ids: list[tuple[str, str, str, list]] = []
 
-    Features (upgraded from v1):
-      - Semantic dedup: similar facts get merged instead of duplicated
-      - Contradiction detection: flags opposing facts
-      - Importance scoring: recency + frequency + content signals
-      - Confidence scoring: repeated mentions increase confidence
-    """
-    session = get_session()
-    try:
+    with session_scope() as session:
         logs = (
             session.query(ConversationLog)
             .filter(ConversationLog.role == "assistant")
             .order_by(desc(ConversationLog.timestamp))
-            .limit(limit)
+            .limit(max(1, limit))
             .all()
         )
 
-        existing = get_stored_facts(session, limit=200) if (run_dedup or run_contradiction_check) else []
+        existing: list[MemoryFact] = []
+        matrix = _embed([])
+        if run_dedup or run_contradiction_check:
+            existing, matrix = _load_existing(session)
 
-        extracted = 0
-        merged = 0
-        contradictions = []
-        skipped = 0
+        seen_lines: set[str] = set()
 
         for log in logs:
-            content = log.content
-            if not content:
-                continue
+            for line in extract_candidates(log.content or ""):
+                normalised = line.lower()
+                if normalised in seen_lines:
+                    skipped += 1
+                    continue
+                seen_lines.add(normalised)
 
-            lines = content.split("\n")
-            for line in lines:
-                line = line.strip()
-                if not line or len(line) < 30:
+                if not (run_dedup or run_contradiction_check) or not existing:
+                    fact = _new_fact(line, log.id)
+                    session.add(fact)
+                    new_ids.append((fact.id, fact.fact, fact.category, fact.tags))
+                    extracted += 1
                     continue
 
-                # Check if it looks like a fact about LO
-                lower = line.lower()
-                if not any(p in lower for p in ["you ", "your ", "you're", "you've", "you'll"]):
+                try:
+                    vector = _embed([line])[0]
+                except Exception as exc:  # noqa: BLE001 - fall back to plain store
+                    logger.warning("Embedding failed during consolidation: %s", exc)
+                    fact = _new_fact(line, log.id)
+                    session.add(fact)
+                    new_ids.append((fact.id, fact.fact, fact.category, fact.tags))
+                    extracted += 1
                     continue
 
-                # Skip questions and commands
-                if line.endswith("?") or line.startswith("!"):
-                    continue
+                sims = _similarities(vector, matrix)
+                best = int(np.argmax(sims)) if sims.size else -1
+                best_sim = float(sims[best]) if best >= 0 else 0.0
 
-                # Check if we already have something very similar (exact match on first 60 chars)
-                existing_exact = (
-                    session.query(MemoryFact)
-                    .filter(MemoryFact.fact.ilike(f"%{line[:60]}%"))
-                    .first()
-                )
-                if existing_exact:
-                    # Boost importance instead of duplicating
-                    existing_exact.importance = min(10, existing_exact.importance + 1)
-                    existing_exact.access_count += 1
-                    existing_exact.last_accessed = datetime.now(timezone.utc)
+                if run_contradiction_check and best >= 0:
+                    contra_idx = _find_contradiction(line, sims, existing)
+                    if contra_idx is not None:
+                        contra = existing[contra_idx]
+                        contradictions.append(
+                            {
+                                "new_fact": line[:100],
+                                "existing_fact": contra.fact[:100],
+                                "existing_id": contra.id,
+                            }
+                        )
+                        contra.confidence = max(0.1, (contra.confidence or 1.0) - 0.3)
+
+                if run_dedup and best_sim >= config.dedup_similarity_threshold:
+                    ef = existing[best]
+                    if len(line) > len(ef.fact):
+                        ef.fact = line[:500]
+                    ef.importance = min(
+                        10,
+                        max(
+                            ef.importance or 0,
+                            compute_importance(line, ef.access_count or 0),
+                        ),
+                    )
+                    ef.access_count = (ef.access_count or 0) + 1
+                    ef.confidence = min(1.0, (ef.confidence or 0.6) + 0.1)
+                    ef.last_accessed = datetime.now(UTC)
                     merged += 1
                     continue
 
-                # Compute embedding for semantic dedup
-                if run_dedup and existing:
-                    try:
-                        embedding = _embed([line])[0]
-
-                        # Check for contradiction
-                        if run_contradiction_check:
-                            contra = check_contradiction(line, embedding, existing)
-                            if contra:
-                                contradictions.append({
-                                    "new_fact": line[:100],
-                                    "existing_fact": contra.fact[:100],
-                                    "existing_id": contra.id,
-                                })
-                                # Flag both with lower confidence
-                                contra.confidence = max(0.1, contra.confidence - 0.3)
-
-                        # Check for near-duplicate (merge instead of create)
-                        similar = find_similar_fact(line, embedding, existing)
-                        if similar:
-                            ef, sim = similar
-                            # Merge: take longer/more specific fact, boost importance
-                            if len(line) > len(ef.fact):
-                                ef.fact = line[:500]
-                            ef.importance = min(10, max(ef.importance, compute_importance(line, ef.access_count)))
-                            ef.access_count += 1
-                            ef.confidence = min(1.0, ef.confidence + 0.1)
-                            ef.last_accessed = datetime.now(timezone.utc)
-                            merged += 1
-                            continue
-                    except Exception:
-                        pass  # If embedding fails, fall through to simple storage
-
-                # Extract and store as new memory
-                importance = compute_importance(line, source="auto-extracted")
-                fact = MemoryFact(
-                    id=str(uuid.uuid4()),
-                    fact=line[:500],
-                    category="event",
-                    importance=importance,
-                    source="consolidation",
-                    confidence=0.6,
-                    tags=["auto-extracted", "conversation"],
-                    context=f"Extracted from conversation log {log.id}",
-                    timestamp=datetime.now(timezone.utc),
-                    last_accessed=datetime.now(timezone.utc),
-                )
+                fact = _new_fact(line, log.id)
                 session.add(fact)
+                new_ids.append((fact.id, fact.fact, fact.category, fact.tags))
                 extracted += 1
 
-        session.commit()
-        result = {
-            "logs_scanned": len(logs),
-            "memories_extracted": extracted,
-            "memories_merged": merged,
-            "contradictions_found": len(contradictions),
-        }
-        if contradictions:
-            result["contradictions"] = contradictions[:5]
-        return result
-    finally:
-        session.close()
+                # Append to the comparison pool so two near-identical lines in
+                # the *same* run dedupe against each other. Previously the pool
+                # was a snapshot, so one run could insert 40 copies of a line.
+                existing.append(fact)
+                matrix = np.vstack([matrix, vector.reshape(1, -1)]) if matrix.size else vector.reshape(1, -1)
+
+    from .store import _index_memory_keywords
+
+    for memory_id, text, category, tags in new_ids:
+        _index_memory_keywords(memory_id, text, category, tags or [])
+
+    result = {
+        "logs_scanned": len(logs),
+        "memories_extracted": extracted,
+        "memories_merged": merged,
+        "candidates_skipped": skipped,
+        "contradictions_found": len(contradictions),
+    }
+    if contradictions:
+        result["contradictions"] = contradictions[:5]
+    return result
 
 
-def reflect(
-    max_clusters: int = 5,
-    min_facts_per_cluster: int = 2,
-) -> list[dict]:
-    """Reflect on stored facts to synthesize higher-level beliefs.
+def _find_contradiction(line: str, sims: np.ndarray, existing: list[MemoryFact]) -> int | None:
+    """Index of a near-identical fact with opposite polarity, if any."""
+    new_pol = _polarity(line)
+    if abs(new_pol) < 0.3:
+        return None
+    threshold = config.contradiction_distance_threshold
+    for idx in np.argsort(-sims)[:10]:
+        if float(sims[idx]) < threshold:
+            break
+        other_pol = _polarity(existing[int(idx)].fact)
+        if (new_pol > 0.3 and other_pol < -0.3) or (new_pol < -0.3 and other_pol > 0.3):
+            return int(idx)
+    return None
 
-    Based on the Stanford 2023 Generative Agents paper: removing reflection
-    broke emergent behaviors. This function groups related observations into:
 
-      1. Mid-level themes — patterns across similar facts
-      2. High-level beliefs — synthesized understanding across themes
+def _new_fact(line: str, log_id: str) -> MemoryFact:
+    return MemoryFact(
+        id=str(uuid.uuid4()),
+        fact=line[:500],
+        category="event",
+        importance=compute_importance(line, source="auto-extracted"),
+        source="consolidation",
+        confidence=0.6,
+        tags=["auto-extracted", "conversation"],
+        context=f"Extracted from conversation log {log_id}",
+        timestamp=datetime.now(UTC),
+        last_accessed=datetime.now(UTC),
+        access_count=0,
+    )
 
-    Uses the existing sentence embedder for semantic clustering. No new deps.
 
-    Args:
-        max_clusters: Maximum number of theme clusters to create
-        min_facts_per_cluster: Minimum facts needed to form a theme
+def reflect(max_clusters: int = 5, min_facts_per_cluster: int = 2) -> list[dict]:
+    """Cluster observations into mid-level themes (Generative Agents, 2023)."""
+    reflections: list[dict] = []
+    new_themes: list[tuple[str, str, str, list]] = []
 
-    Returns:
-        List of synthesized reflections (themes and beliefs)
-    """
-    session = get_session()
-    try:
-        # Get all auto-extracted facts (not manual)
+    with session_scope() as session:
         facts = (
             session.query(MemoryFact)
             .filter(MemoryFact.category.in_(["event", "general"]))
@@ -386,120 +443,123 @@ def reflect(
             .limit(100)
             .all()
         )
-
         if len(facts) < min_facts_per_cluster:
             return []
 
-        # Compute embeddings for all facts
-        texts = [f.fact[:200] for f in facts]
-        embeddings = _embed(texts)
+        matrix = _embed([f.fact[:200] for f in facts])
 
-        # Simple greedy clustering: highest-importance facts become cluster seeds
-        clusters = []
-        used = set()
-
+        clusters: list[list[int]] = []
+        used: set[int] = set()
         for idx in range(len(facts)):
             if idx in used:
                 continue
-            cluster = [idx]
-            used.add(idx)
-
-            for jdx in range(idx + 1, len(facts)):
-                if jdx in used:
-                    continue
-                sim = _cosine_sim(embeddings[idx], embeddings[jdx])
-                if sim > 0.75:  # moderately tight cluster
-                    cluster.append(jdx)
-                    used.add(jdx)
-
+            sims = _similarities(matrix[idx], matrix)
+            cluster = [idx] + [
+                j for j in range(idx + 1, len(facts)) if j not in used and float(sims[j]) > 0.75
+            ]
+            used.update(cluster)
             if len(cluster) >= min_facts_per_cluster:
                 clusters.append(cluster)
-
             if len(clusters) >= max_clusters:
                 break
 
-        # For each cluster, synthesize a mid-level theme
-        reflections = []
-        for cluster_indices in clusters:
-            cluster_facts = [facts[i] for i in cluster_indices]
+        if not clusters:
+            return []
 
-            # Find the most representative fact (highest importance × confidence)
-            cluster_facts.sort(
-                key=lambda f: f.importance * f.confidence,
+        # Compare candidate themes against *themes*, not against the
+        # observation pool they were derived from.
+        themes = (
+            session.query(MemoryFact)
+            .filter(MemoryFact.category == "theme")
+            .order_by(desc(MemoryFact.timestamp))
+            .limit(200)
+            .all()
+        )
+        theme_matrix = _embed([t.fact[:200] for t in themes]) if themes else _embed([])
+
+        for cluster_indices in clusters:
+            cluster_facts = sorted(
+                (facts[i] for i in cluster_indices),
+                key=lambda f: (f.importance or 0) * (f.confidence or 0.0),
                 reverse=True,
             )
             representative = cluster_facts[0]
 
-            # Build a theme sentence
-            theme_sources = [f.fact[:120] for f in cluster_facts[:5]]
-            theme_text = (
-                f"[Theme] Repeated pattern: connected observations about "
-                f"{_extract_topic(representative.fact)[:60]}"
-            )
+            if _synthesiser is not None:
+                theme_text = _synthesiser([f.fact for f in cluster_facts])
+            else:
+                theme_text = (
+                    "[Theme] Repeated pattern: connected observations about "
+                    f"{_extract_topic(representative.fact)[:60]}"
+                )
 
-            # Check if a similar theme already exists
-            theme_embedding = _embed([theme_text])[0]
-            existing_similar = find_similar_fact(theme_text, theme_embedding, facts, threshold=0.85)
-            if existing_similar:
-                # Update existing theme instead of creating new one
-                ef, sim = existing_similar
-                ef.importance = min(10, ef.importance + 1)
-                ef.confidence = min(1.0, ef.confidence + 0.05)
-                ef.last_accessed = datetime.now(timezone.utc)
-                reflections.append({
-                    "type": "theme_updated",
-                    "theme": ef.fact[:150],
-                    "supporting_facts": len(cluster_facts),
-                    "confidence": ef.confidence,
-                })
+            theme_vector = _embed([theme_text])[0]
+            sims = _similarities(theme_vector, theme_matrix)
+            if sims.size and float(sims.max()) >= 0.85:
+                existing_theme = themes[int(np.argmax(sims))]
+                existing_theme.importance = min(10, (existing_theme.importance or 5) + 1)
+                existing_theme.confidence = min(1.0, (existing_theme.confidence or 0.5) + 0.05)
+                existing_theme.last_accessed = datetime.now(UTC)
+                reflections.append(
+                    {
+                        "type": "theme_updated",
+                        "theme": existing_theme.fact[:150],
+                        "supporting_facts": len(cluster_facts),
+                        "confidence": existing_theme.confidence,
+                    }
+                )
                 continue
 
-            # Store as a mid-level theme
+            cluster_tags = sorted({t for f in cluster_facts for t in (f.tags or [])})[:3]
             theme = MemoryFact(
                 id=str(uuid.uuid4()),
                 fact=theme_text[:500],
                 category="theme",
-                importance=min(10, sum(f.importance for f in cluster_facts) // len(cluster_facts) + 1),
+                importance=min(
+                    10,
+                    sum(f.importance or 0 for f in cluster_facts) // len(cluster_facts) + 1,
+                ),
                 source="reflection",
                 confidence=0.5,
-                tags=["reflection", "theme"] + list(set(t for f in cluster_facts for t in (f.tags or [])))[:3],
+                tags=["reflection", "theme", *cluster_tags],
                 context=f"Synthesized from {len(cluster_facts)} related observations",
-                timestamp=datetime.now(timezone.utc),
-                last_accessed=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
+                last_accessed=datetime.now(UTC),
+                access_count=0,
             )
             session.add(theme)
+            themes.append(theme)
+            theme_matrix = (
+                np.vstack([theme_matrix, theme_vector.reshape(1, -1)])
+                if theme_matrix.size
+                else theme_vector.reshape(1, -1)
+            )
+            new_themes.append((theme.id, theme.fact, theme.category, theme.tags))
 
-            reflections.append({
-                "type": "theme_created",
-                "theme": theme_text[:150],
-                "supporting_facts": len(cluster_facts),
-                "confidence": theme.confidence,
-                "top_fact": representative.fact[:100],
-            })
+            reflections.append(
+                {
+                    "type": "theme_created",
+                    "theme": theme_text[:150],
+                    "supporting_facts": len(cluster_facts),
+                    "confidence": theme.confidence,
+                    "top_fact": representative.fact[:100],
+                }
+            )
 
-        session.commit()
-        return reflections
-    finally:
-        session.close()
+    from .store import _index_memory_keywords
+
+    for memory_id, text, category, tags in new_themes:
+        _index_memory_keywords(memory_id, text, category, tags or [])
+
+    return reflections
 
 
 def run_pipeline() -> dict:
-    """Run the full consolidation pipeline.
-
-    Steps:
-      1. Consolidate recent conversations → extract facts
-      2. Semantic dedup and contradiction check
-      3. Reflect: synthesize observations → mid-level themes → high-level beliefs
-      4. Return summary
-    """
+    """Extract facts from recent logs, then reflect over the result."""
     result = consolidate_recent(
         limit=config.consolidation_batch_size,
         run_dedup=True,
         run_contradiction_check=True,
     )
-
-    # Step 3: Reflection hierarchy (Stanford Generative Agents paper)
-    reflection = reflect()
-    result["reflections"] = reflection
-
+    result["reflections"] = reflect()
     return result

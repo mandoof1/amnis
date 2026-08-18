@@ -15,12 +15,17 @@ Based on the CoALA framework research:
 """
 
 import json
+import logging
+import os
+import threading
 import time
-from pathlib import Path
-from typing import Any, Optional
 from collections import OrderedDict
+from pathlib import Path
+from typing import Any
 
 from ..config import config
+
+logger = logging.getLogger(__name__)
 
 
 class WorkingMemory:
@@ -37,18 +42,20 @@ class WorkingMemory:
     def __init__(
         self,
         max_slots: int = 20,
-        persist_path: Optional[Path] = None,
+        persist_path: Path | None = None,
     ):
         self.max_slots = max_slots
-        self.persist_path = persist_path or (
-            config.data_dir / "working_memory.json"
-        )
+        self.persist_path = persist_path or (config.data_dir / "working_memory.json")
         self._slots: OrderedDict[str, dict] = OrderedDict()
+        # Working memory is touched from FastAPI's threadpool as well as
+        # the MCP loop; without this, two concurrent pushes could
+        # interleave and _save() could serialise a half-mutated dict.
+        self._lock = threading.RLock()
         self._load()
 
     # ─── Slot Operations ────────────────────────────────────────────
 
-    def push(self, slot: str, content: Any, metadata: Optional[dict] = None) -> dict:
+    def push(self, slot: str, content: Any, metadata: dict | None = None) -> dict:
         """Write to a working memory slot. Creates or overwrites.
 
         Args:
@@ -65,12 +72,13 @@ class WorkingMemory:
             "metadata": metadata or {},
             "timestamp": time.time(),
         }
-        self._slots[slot] = entry
-        self._evict_if_needed()
-        self._save()
+        with self._lock:
+            self._slots[slot] = entry
+            self._evict_if_needed()
+            self._save()
         return entry
 
-    def pop(self, slot: str) -> Optional[dict]:
+    def pop(self, slot: str) -> dict | None:
         """Read and remove a slot.
 
         Args:
@@ -79,12 +87,13 @@ class WorkingMemory:
         Returns:
             The slot entry, or None if not found
         """
-        entry = self._slots.pop(slot, None)
-        if entry:
-            self._save()
+        with self._lock:
+            entry = self._slots.pop(slot, None)
+            if entry:
+                self._save()
         return entry
 
-    def get(self, slot: str) -> Optional[dict]:
+    def get(self, slot: str) -> dict | None:
         """Read a slot without removing it. Updates last_accessed.
 
         Args:
@@ -104,9 +113,10 @@ class WorkingMemory:
         Returns:
             Number of slots cleared
         """
-        count = len(self._slots)
-        self._slots.clear()
-        self._save()
+        with self._lock:
+            count = len(self._slots)
+            self._slots.clear()
+            self._save()
         return count
 
     # ─── Bulk Operations ────────────────────────────────────────────
@@ -139,8 +149,9 @@ class WorkingMemory:
             )
             results.append(result)
 
-        self._slots.clear()
-        self._save()
+        with self._lock:
+            self._slots.clear()
+            self._save()
         return results
 
     def snapshot(self) -> dict:
@@ -164,7 +175,7 @@ class WorkingMemory:
         """Check if text fits in a slot under a character budget."""
         return len(text) <= limit_chars
 
-    def evict_lowest_priority(self) -> Optional[str]:
+    def evict_lowest_priority(self) -> str | None:
         """Evict the slot with the oldest timestamp.
 
         Returns:
@@ -172,12 +183,13 @@ class WorkingMemory:
         """
         if not self._slots:
             return None
-        oldest_slot = min(
-            self._slots,
-            key=lambda s: self._slots[s].get("timestamp", 0),
-        )
-        entry = self._slots.pop(oldest_slot)
-        self._save()
+        with self._lock:
+            oldest_slot = min(
+                self._slots,
+                key=lambda s: self._slots[s].get("timestamp", 0),
+            )
+            self._slots.pop(oldest_slot)
+            self._save()
         return oldest_slot
 
     # ─── Internal ───────────────────────────────────────────────────
@@ -188,12 +200,20 @@ class WorkingMemory:
             self._slots.popitem(last=False)  # FIFO eviction
 
     def _save(self):
-        """Persist to JSON file."""
+        """Persist to JSON atomically.
+
+        The previous implementation truncated the real file and then wrote
+        into it, so a crash (or a second writer) mid-dump left behind a
+        half-written file that _load() would discard entirely. Writing to a
+        temp file and renaming makes the swap atomic on POSIX.
+        """
         if not self.persist_path:
             return
+        tmp = None
         try:
             self.persist_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.persist_path, "w") as f:
+            tmp = self.persist_path.with_suffix(self.persist_path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(
                     {
                         "max_slots": self.max_slots,
@@ -202,8 +222,16 @@ class WorkingMemory:
                     f,
                     default=str,
                 )
-        except Exception:
-            pass  # Non-critical — working memory recovers from scratch
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.persist_path)
+        except OSError as exc:
+            logger.warning("Could not persist working memory: %s", exc)
+            if tmp is not None:
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _load(self):
         """Restore from JSON file on init."""
@@ -217,9 +245,34 @@ class WorkingMemory:
                 slot = entry.get("slot")
                 if slot:
                     self._slots[slot] = entry
-        except Exception:
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            logger.warning("Discarding unreadable working memory file: %s", exc)
             self._slots.clear()
 
 
-# Singleton — shared across the app
-working_memory = WorkingMemory()
+# ─── Lazy singleton ─────────────────────────────────────────────────
+#
+# Constructing this at import time read (and created) a file on disk as a side
+# effect of `import amnis`, which meant tests and `--help` both touched the
+# user's data directory.
+
+_working_memory: WorkingMemory | None = None
+
+
+def get_working_memory() -> WorkingMemory:
+    global _working_memory
+    if _working_memory is None:
+        _working_memory = WorkingMemory()
+    return _working_memory
+
+
+def reset_working_memory() -> None:
+    """Drop the cached instance — used by tests and after a config change."""
+    global _working_memory
+    _working_memory = None
+
+
+def __getattr__(name: str):
+    if name == "working_memory":
+        return get_working_memory()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

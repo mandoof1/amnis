@@ -1,1118 +1,1763 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Amnis</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/vis-network@9.1.6/dist/vis-network.min.js"></script>
+<!--
+  Fully self-contained: no CDN scripts, no webfonts, no external requests.
+  The 0.1 dashboard pulled vis-network and Inter from third-party CDNs, which
+  made a local-first memory tool fail offline and leak every page view.
+  The knowledge graph below is a ~200-line canvas force simulation instead.
+-->
 <style>
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-
-:root{
-  --bg:#050508;
-  --bg-warm:#08080d;
-  --surface-0:rgba(255,255,255,0.02);
-  --surface-1:rgba(255,255,255,0.04);
-  --surface-2:rgba(255,255,255,0.06);
-  --surface-3:rgba(255,255,255,0.09);
-  --surface-hover:rgba(255,255,255,0.08);
-
-  --border-faint:rgba(255,255,255,0.06);
-  --border-subtle:rgba(255,255,255,0.08);
-  --border-default:rgba(255,255,255,0.1);
-  --border-strong:rgba(255,255,255,0.16);
-  --border-accent:rgba(139,92,246,0.4);
-
-  --ink-primary:rgba(255,255,255,0.93);
-  --ink-secondary:rgba(255,255,255,0.55);
-  --ink-tertiary:rgba(255,255,255,0.32);
-  --ink-placeholder:rgba(255,255,255,0.2);
-
-  --accent:#8b5cf6;
-  --accent-glow:rgba(139,92,246,0.15);
-  --accent-hover:#a78bfa;
-  --accent-ring:rgba(139,92,246,0.25);
-
-  --emerald:#34d399;
-  --emerald-glow:rgba(52,211,153,0.12);
-  --sky:#38bdf8;
-  --sky-glow:rgba(56,189,248,0.12);
-  --amber:#fbbf24;
-  --amber-glow:rgba(251,191,36,0.12);
-  --rose:#f472b6;
-  --rose-glow:rgba(244,114,182,0.12);
-  --red:#f87171;
-  --red-glow:rgba(248,113,113,0.12);
-  --slate:#94a3b8;
-
-  --cat-preference:#fbbf24;
-  --cat-fact:#34d399;
-  --cat-event:#38bdf8;
-  --cat-procedure:#a78bfa;
-  --cat-concept:#f472b6;
-  --cat-meta:#64748b;
-  --cat-general:#94a3b8;
-
-  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-  --font-mono:'JetBrains Mono','SF Mono',monospace;
-
-  --ease:cubic-bezier(0.16,1,0.3,1);
-  --ease-spring:cubic-bezier(0.34,1.56,0.64,1);
-  --dur-fast:120ms;
-  --dur:200ms;
-  --dur-slow:350ms;
-
-  --radius:12px;
-  --radius-sm:8px;
-  --radius-xs:6px;
+:root {
+  color-scheme: light;
+  --bg:            #f6f7f9;
+  --surface:       #ffffff;
+  --surface-2:     #f1f3f6;
+  --surface-3:     #e7eaef;
+  --border:        #dde1e8;
+  --border-faint:  #e9ecf1;
+  --ink:           #12161c;
+  --ink-2:         #4a525e;
+  --ink-3:         #7b8595;
+  --accent:        #6d4aff;
+  --accent-soft:   #efeaff;
+  --accent-ink:    #ffffff;
+  --emerald:       #0f9d63;
+  --sky:           #0284c7;
+  --amber:         #c2740a;
+  --rose:          #dc2626;
+  --shadow-sm:     0 1px 2px rgba(16,20,28,.06), 0 1px 3px rgba(16,20,28,.04);
+  --shadow-md:     0 4px 12px rgba(16,20,28,.08), 0 1px 3px rgba(16,20,28,.05);
+  --shadow-lg:     0 18px 48px rgba(16,20,28,.16);
+  --radius:        12px;
+  --radius-sm:     8px;
+  --radius-xs:     6px;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --cat-preference: #b45309;
+  --cat-fact:       #0f9d63;
+  --cat-event:      #2563eb;
+  --cat-procedure:  #7c3aed;
+  --cat-concept:    #db2777;
+  --cat-theme:      #e11d48;
+  --cat-meta:       #64748b;
+  --cat-general:    #64748b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg:           #0b0d11;
+    --surface:      #14181f;
+    --surface-2:    #1b2029;
+    --surface-3:    #242b36;
+    --border:       #2a313d;
+    --border-faint: #1f242e;
+    --ink:          #e9edf3;
+    --ink-2:        #a4aebd;
+    --ink-3:        #6b7686;
+    --accent:       #9d86ff;
+    --accent-soft:  #241d45;
+    --accent-ink:   #0b0d11;
+    --emerald:      #35d399;
+    --sky:          #38bdf8;
+    --amber:        #fbbf24;
+    --rose:         #fb7185;
+    --shadow-sm:    0 1px 2px rgba(0,0,0,.4);
+    --shadow-md:    0 4px 14px rgba(0,0,0,.45);
+    --shadow-lg:    0 20px 56px rgba(0,0,0,.6);
+    --cat-preference: #fbbf24;
+    --cat-fact:       #35d399;
+    --cat-event:      #60a5fa;
+    --cat-procedure:  #a78bfa;
+    --cat-concept:    #f472b6;
+    --cat-theme:      #fb7185;
+    --cat-meta:       #94a3b8;
+    --cat-general:    #94a3b8;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:           #0b0d11;
+  --surface:      #14181f;
+  --surface-2:    #1b2029;
+  --surface-3:    #242b36;
+  --border:       #2a313d;
+  --border-faint: #1f242e;
+  --ink:          #e9edf3;
+  --ink-2:        #a4aebd;
+  --ink-3:        #6b7686;
+  --accent:       #9d86ff;
+  --accent-soft:  #241d45;
+  --accent-ink:   #0b0d11;
+  --emerald:      #35d399;
+  --sky:          #38bdf8;
+  --amber:        #fbbf24;
+  --rose:         #fb7185;
+  --shadow-sm:    0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:    0 4px 14px rgba(0,0,0,.45);
+  --shadow-lg:    0 20px 56px rgba(0,0,0,.6);
+  --cat-preference: #fbbf24;
+  --cat-fact:       #35d399;
+  --cat-event:      #60a5fa;
+  --cat-procedure:  #a78bfa;
+  --cat-concept:    #f472b6;
+  --cat-theme:      #fb7185;
+  --cat-meta:       #94a3b8;
+  --cat-general:    #94a3b8;
 }
 
-html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-::selection{background:var(--accent-glow);color:var(--accent-hover)}
-::-webkit-scrollbar{width:5px;height:5px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:10px}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.14)}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
 
-body{
-  font-family:var(--font-sans);font-size:14px;line-height:1.5;
-  color:var(--ink-primary);background:var(--bg);
-  height:100vh;overflow:hidden;
-  display:flex;flex-direction:column;
+/* ── Shell ─────────────────────────────────────────────────────── */
+#app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+
+#sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 18px 12px;
+  gap: 4px;
+  position: sticky; top: 0; height: 100vh;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 8px; flex: none;
+  background: linear-gradient(140deg, var(--accent), var(--sky));
+  display: grid; place-items: center;
+  color: #fff; font-weight: 800; font-size: 15px;
+}
+.brand-name { font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+.brand-ver { font-size: 11px; color: var(--ink-3); font-family: var(--mono); }
+
+.nav-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 11px;
+  background: none; border: 0; border-radius: var(--radius-sm);
+  color: var(--ink-2); font-weight: 500; text-align: left;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.nav-btn:hover { background: var(--surface-2); color: var(--ink); }
+.nav-btn[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-btn .ico { width: 18px; text-align: center; font-size: 15px; flex: none; }
+.nav-btn .count {
+  margin-left: auto; font-size: 11px; font-family: var(--mono);
+  color: var(--ink-3); background: var(--surface-2);
+  padding: 1px 6px; border-radius: 20px;
+}
+.nav-sep { height: 1px; background: var(--border-faint); margin: 10px 6px; }
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.status-pill {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--ink-3);
+  padding: 7px 11px; border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--emerald); flex: none; }
+.status-dot.warn { background: var(--amber); }
+.status-dot.err  { background: var(--rose); }
+
+#main { display: flex; flex-direction: column; min-width: 0; }
+#topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 24px; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: blur(8px);
+  position: sticky; top: 0; z-index: 20;
+}
+#view-title { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+#view-sub { font-size: 12.5px; color: var(--ink-3); }
+.topbar-spacer { flex: 1; }
+.kbd {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 5px; padding: 1px 5px; background: var(--surface-2);
+}
+#content { padding: 24px; flex: 1; min-width: 0; }
+.view { display: none; }
+.view.active { display: block; animation: fade .18s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ── Controls ──────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--ink); font-weight: 550; cursor: pointer;
+  transition: background .12s, border-color .12s, transform .06s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--surface-2); border-color: var(--ink-3); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { filter: brightness(1.08); background: var(--accent); border-color: var(--accent); }
+.btn-danger { color: var(--rose); border-color: color-mix(in srgb, var(--rose) 40%, var(--border)); }
+.btn-danger:hover { background: color-mix(in srgb, var(--rose) 12%, transparent); }
+.btn-sm { padding: 5px 10px; font-size: 12.5px; }
+.btn-icon { padding: 7px 9px; }
+
+.input, .select, .textarea {
+  width: 100%; padding: 9px 12px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  outline: none; transition: border-color .12s, box-shadow .12s;
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.textarea { resize: vertical; min-height: 92px; font-family: inherit; }
+.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.field .hint { font-size: 11.5px; color: var(--ink-3); }
+
+.toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.toolbar .grow { flex: 1; min-width: 220px; }
+
+.segmented { display: inline-flex; background: var(--surface-2); border-radius: var(--radius-sm); padding: 3px; gap: 2px; }
+.segmented button {
+  border: 0; background: none; padding: 5px 12px; border-radius: 6px;
+  font-size: 12.5px; font-weight: 550; color: var(--ink-3); cursor: pointer;
+}
+.segmented button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* ── Cards & panels ────────────────────────────────────────────── */
+.panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.panel-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 18px; border-bottom: 1px solid var(--border-faint);
+}
+.panel-head h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.panel-body { padding: 16px 18px; }
+.panel-badge {
+  font-size: 11px; font-family: var(--mono); color: var(--ink-3);
+  background: var(--surface-2); padding: 2px 8px; border-radius: 20px;
 }
 
-/* ─── Ambient Background ─── */
-.ambient{
-  position:fixed;inset:0;pointer-events:none;z-index:0;
-  background:
-    radial-gradient(ellipse 80% 50% at 20% 0%,rgba(139,92,246,0.06),transparent),
-    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(56,189,248,0.04),transparent),
-    radial-gradient(ellipse 50% 30% at 50% 50%,rgba(244,114,182,0.02),transparent);
+.stats-grid {
+  display: grid; gap: 14px; margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
-.ambient::after{
-  content:'';position:absolute;inset:0;
-  background:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.015'/%3E%3C/svg%3E");
-  opacity:0.5;
+.stat {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow-sm);
+}
+.stat .label {
+  font-size: 11px; font-weight: 650; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink-3);
+  display: flex; align-items: center; gap: 6px;
+}
+.stat .value { font-size: 30px; font-weight: 720; letter-spacing: -.02em; margin: 6px 0 2px; }
+.stat .sub { font-size: 12px; color: var(--ink-3); }
+
+.grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+
+/* ── Lists ─────────────────────────────────────────────────────── */
+.mem-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
+  cursor: pointer; transition: border-color .12s, box-shadow .12s, transform .08s;
+}
+.mem-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.mem-card .text { margin-bottom: 9px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mem-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-3); }
+.badge {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 20px; color: #fff; white-space: nowrap;
+}
+.imp-bar { display: inline-flex; gap: 2px; align-items: center; }
+.imp-bar i { width: 3px; height: 11px; border-radius: 2px; background: var(--surface-3); display: block; }
+.imp-bar i.on { background: var(--accent); }
+.tag {
+  font-size: 11px; font-family: var(--mono); color: var(--ink-2);
+  background: var(--surface-2); border: 1px solid var(--border-faint);
+  padding: 1px 7px; border-radius: 20px;
 }
 
-/* ─── App Shell ─── */
-#app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
+.compact-list { list-style: none; margin: 0; padding: 0; }
+.compact-list li {
+  padding: 10px 0; border-bottom: 1px solid var(--border-faint);
+  display: flex; gap: 10px; align-items: flex-start; cursor: pointer;
+}
+.compact-list li:last-child { border-bottom: 0; }
+.compact-list li:hover .li-text { color: var(--accent); }
+.li-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.li-side { font-size: 11px; color: var(--ink-3); font-family: var(--mono); white-space: nowrap; }
 
-/* ─── Header ─── */
-header{
-  display:flex;align-items:center;gap:16px;
-  padding:0 24px;height:56px;flex-shrink:0;
-  background:rgba(5,5,8,0.8);
-  backdrop-filter:blur(20px) saturate(1.5);
-  -webkit-backdrop-filter:blur(20px) saturate(1.5);
-  border-bottom:1px solid var(--border-faint);
-  z-index:100;
+.bar-row { display: grid; grid-template-columns: 96px 1fr 44px; gap: 10px; align-items: center; margin-bottom: 9px; }
+.bar-row .name { font-size: 12px; color: var(--ink-2); text-transform: capitalize; }
+.bar-track { height: 8px; background: var(--surface-2); border-radius: 20px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 20px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+.bar-row .num { font-size: 12px; font-family: var(--mono); color: var(--ink-3); text-align: right; }
+
+.result {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px;
 }
-.logo{display:flex;align-items:center;gap:10px}
-.logo-icon{
-  width:28px;height:28px;border-radius:8px;
-  background:linear-gradient(135deg,var(--accent),#c084fc);
-  display:flex;align-items:center;justify-content:center;
-  font-size:14px;box-shadow:0 0 20px rgba(139,92,246,0.3);
+.result-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.result-src { font-family: var(--mono); font-size: 11.5px; color: var(--sky); overflow-wrap: anywhere; }
+.result-body { color: var(--ink-2); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.score { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: auto; }
+
+/* ── Wiki ──────────────────────────────────────────────────────── */
+.wiki-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; align-items: start; }
+.wiki-list { list-style: none; margin: 0; padding: 6px; max-height: 68vh; overflow-y: auto; }
+.wiki-list li {
+  padding: 8px 10px; border-radius: var(--radius-xs); cursor: pointer;
+  font-size: 13px; color: var(--ink-2);
 }
-.logo h1{font-size:18px;font-weight:700;letter-spacing:-0.02em}
-.logo h1 span{
-  background:linear-gradient(135deg,var(--accent),var(--rose));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  background-clip:text;
+.wiki-list li:hover { background: var(--surface-2); color: var(--ink); }
+.wiki-list li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.wiki-doc { padding: 22px 26px; max-height: 68vh; overflow-y: auto; }
+.wiki-doc h1 { font-size: 23px; margin: 0 0 6px; letter-spacing: -.02em; }
+.wiki-doc h2 { font-size: 16px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-faint); }
+.wiki-doc h3 { font-size: 14px; margin: 18px 0 6px; color: var(--ink-2); }
+.wiki-doc p { margin: 0 0 10px; }
+.wiki-doc ul { margin: 0 0 12px; padding-left: 20px; }
+.wiki-doc li { margin-bottom: 5px; }
+.wiki-doc blockquote {
+  margin: 0 0 12px; padding: 8px 14px; border-left: 3px solid var(--accent);
+  background: var(--surface-2); border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  color: var(--ink-2); font-size: 13px;
 }
-.logo .subtitle{
-  font-size:10px;font-weight:500;color:var(--ink-tertiary);
-  text-transform:uppercase;letter-spacing:0.08em;
+.wiki-doc code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+.wiki-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Graph ─────────────────────────────────────────────────────── */
+#graph-wrap {
+  position: relative; height: calc(100vh - 190px); min-height: 420px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); overflow: hidden;
+}
+#graph-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#graph-canvas.dragging { cursor: grabbing; }
+.graph-overlay { position: absolute; display: flex; gap: 6px; z-index: 3; }
+.graph-overlay.tl { top: 12px; left: 12px; flex-direction: column; align-items: flex-start; }
+.graph-overlay.tr { top: 12px; right: 12px; }
+.graph-legend {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;
+  backdrop-filter: blur(6px);
+}
+.legend-item { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.legend-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.legend-swatch.box { border-radius: 3px; }
+#graph-tip {
+  position: absolute; z-index: 5; pointer-events: none; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  padding: 8px 11px; font-size: 12.5px; display: none; overflow-wrap: anywhere;
+}
+#graph-tip .tip-kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin-bottom: 3px; }
+#graph-hud {
+  position: absolute; bottom: 12px; left: 12px; z-index: 3;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 5px 9px;
 }
 
-nav{display:flex;gap:2px;margin-left:auto;background:var(--surface-1);border-radius:10px;padding:3px}
-nav button{
-  background:none;border:none;color:var(--ink-secondary);
-  padding:6px 14px;font-size:13px;font-weight:500;
-  cursor:pointer;border-radius:7px;
-  font-family:inherit;transition:all var(--dur) var(--ease);
-  position:relative;white-space:nowrap;
+/* ── Modal ─────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(9,11,15,.55); backdrop-filter: blur(3px);
+  display: none; align-items: center; justify-content: center; padding: 20px;
 }
-nav button:hover{color:var(--ink-primary);background:var(--surface-hover)}
-nav button.active{color:white;background:var(--accent);box-shadow:0 0 16px rgba(139,92,246,0.25)}
+.modal-backdrop.open { display: flex; animation: fade .14s ease; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: var(--shadow-lg);
+  width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+}
+.modal-head { display: flex; align-items: center; gap: 10px; padding: 18px 22px 0; }
+.modal-head h2 { margin: 0; font-size: 16px; font-weight: 650; flex: 1; }
+.modal-body { padding: 16px 22px; }
+.modal-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 0 22px 20px; flex-wrap: wrap; }
+.close-x { border: 0; background: none; color: var(--ink-3); font-size: 20px; cursor: pointer; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.close-x:hover { background: var(--surface-2); color: var(--ink); }
+.detail-row { padding: 10px 0; border-bottom: 1px solid var(--border-faint); }
+.detail-row:last-child { border-bottom: 0; }
+.detail-label { font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px; }
+.detail-value { font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.detail-value.mono { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 
-/* ─── Main ─── */
-main{flex:1;display:flex;overflow:hidden}
-.tab-content{
-  display:none;flex:1;padding:24px;overflow-y:auto;
-  animation:fadeIn var(--dur-slow) var(--ease);
-}
-.tab-content.active{display:flex;flex-direction:column}
-.tab-content#tab-dashboard{overflow:hidden}
-@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* ── Command palette ───────────────────────────────────────────── */
+#palette-backdrop { align-items: flex-start; padding-top: 12vh; }
+#palette { max-width: 560px; width: 100%; }
+#palette-input { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 16px 20px; font-size: 15px; }
+#palette-input:focus { box-shadow: none; border-color: var(--accent); }
+#palette-results { list-style: none; margin: 0; padding: 6px; max-height: 46vh; overflow-y: auto; }
+#palette-results li { padding: 9px 14px; border-radius: var(--radius-xs); cursor: pointer; display: flex; align-items: center; gap: 10px; }
+#palette-results li[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+#palette-results .pal-hint { margin-left: auto; font-size: 11px; color: var(--ink-3); }
 
-/* ─── Dashboard Stats ─── */
-.stats-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);
-  gap:14px;margin-bottom:20px;flex-shrink:0;
+/* ── Toasts, skeletons, empty ──────────────────────────────────── */
+#toasts { position: fixed; bottom: 20px; right: 20px; z-index: 200; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+  padding: 11px 15px; font-size: 13px; max-width: 380px;
+  animation: slidein .2s cubic-bezier(.2,.8,.2,1); overflow-wrap: anywhere;
 }
-@media(max-width:1100px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:600px){.stats-grid{grid-template-columns:repeat(2,1fr);gap:10px}}
+.toast.ok  { border-left-color: var(--emerald); }
+.toast.err { border-left-color: var(--rose); }
+@keyframes slidein { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 
-.stat-card{
-  position:relative;overflow:hidden;
-  background:var(--surface-1);border:1px solid var(--border-subtle);
-  border-radius:var(--radius);padding:20px;
-  transition:all var(--dur) var(--ease);
-}
-.stat-card:hover{border-color:var(--border-strong);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,0.3)}
-.stat-card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  border-radius:var(--radius) var(--radius) 0 0;
-}
-.stat-card.memory::before{background:linear-gradient(90deg,var(--emerald),#6ee7b7)}
-.stat-card.rag::before{background:linear-gradient(90deg,var(--sky),#7dd3fc)}
-.stat-card.wiki::before{background:linear-gradient(90deg,var(--accent),#c4b5fd)}
-.stat-card.categories::before{background:linear-gradient(90deg,var(--amber),#fcd34d)}
-.stat-card .stat-glow{
-  position:absolute;top:-20px;right:-20px;width:80px;height:80px;
-  border-radius:50%;filter:blur(30px);opacity:0.4;pointer-events:none;
-}
-.stat-card.memory .stat-glow{background:var(--emerald)}
-.stat-card.rag .stat-glow{background:var(--sky)}
-.stat-card.wiki .stat-glow{background:var(--accent)}
-.stat-card.categories .stat-glow{background:var(--amber)}
+.skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 6px; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.sk-value { height: 30px; width: 62%; margin: 6px 0 4px; }
+.sk-line { height: 11px; width: 80%; margin: 4px 0; }
+.sk-card { height: 68px; margin-bottom: 10px; }
 
-.stat-card .stat-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
-.stat-card .stat-label{font-size:11px;font-weight:600;color:var(--ink-tertiary);text-transform:uppercase;letter-spacing:0.08em}
-.stat-card .stat-icon{font-size:16px;opacity:0.6}
-.stat-card .value{font-size:32px;font-weight:800;line-height:1;letter-spacing:-0.03em}
-.stat-card.memory .value{color:var(--emerald)}
-.stat-card.rag .value{color:var(--sky)}
-.stat-card.wiki .value{color:var(--accent)}
-.stat-card.categories .value{color:var(--amber)}
-.stat-card .sub{font-size:11px;color:var(--ink-tertiary);margin-top:8px;line-height:1.4}
+.empty { text-align: center; padding: 48px 20px; color: var(--ink-3); }
+.empty .em-ico { font-size: 30px; opacity: .5; margin-bottom: 8px; }
+.empty .em-title { font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
+.spinner {
+  width: 13px; height: 13px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .7s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
-/* ─── Activity Panels ─── */
-.activity-section{display:grid;grid-template-columns:1fr 1fr;gap:14px;flex:1;min-height:0;min-width:0}
-@media(max-width:960px){.activity-section{grid-template-columns:1fr}}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.activity-panel{
-  background:var(--surface-1);border:1px solid var(--border-subtle);
-  border-radius:var(--radius);padding:16px;
-  display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;
-  transition:border-color var(--dur) var(--ease);
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; }
+  #sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px; }
+  .brand { padding: 4px 8px; }
+  .nav-btn { width: auto; }
+  .nav-btn .count, .nav-sep, .sidebar-foot { display: none; }
+  .wiki-layout { grid-template-columns: 1fr; }
+  #content { padding: 16px; }
+  #topbar { padding: 12px 16px; }
 }
-.activity-panel:hover{border-color:var(--border-default)}
-.panel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.panel-title{font-size:13px;font-weight:600;color:var(--ink-secondary)}
-.panel-badge{font-size:10px;color:var(--ink-tertiary);background:var(--surface-2);padding:2px 8px;border-radius:10px}
-
-/* Memory list */
-.memory-list{list-style:none;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;min-width:0}
-.memory-list li{
-  padding:8px 12px;background:var(--surface-2);border:1px solid var(--border-faint);
-  border-radius:var(--radius-xs);font-size:13px;cursor:pointer;
-  transition:all var(--dur-fast) var(--ease);
-  display:flex;align-items:center;gap:8px;min-width:0;
-}
-.memory-list li:hover{border-color:var(--border-accent);background:var(--surface-3);transform:translateX(2px)}
-
-.cat-badge{
-  display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;
-  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;
-  flex-shrink:0;line-height:1.4;
-}
-.fact-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-primary)}
-.importance-chip{font-size:11px;color:var(--ink-tertiary);flex-shrink:0;font-variant-numeric:tabular-nums}
-
-/* Category chart */
-.category-chart{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
-.chart-bar-row{display:flex;align-items:center;gap:8px;min-width:0}
-.chart-bar-label{font-size:11px;color:var(--ink-secondary);width:64px;flex-shrink:0;text-transform:capitalize;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.chart-bar-track{flex:1;min-width:30px;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden}
-.chart-bar-fill{height:100%;border-radius:3px;transition:width 600ms var(--ease)}
-.chart-bar-count{font-size:11px;color:var(--ink-tertiary);min-width:22px;text-align:right;font-variant-numeric:tabular-nums;flex-shrink:0}
-
-/* ─── Graph ─── */
-#graph-container{
-  flex:1;background:
-    radial-gradient(ellipse at 30% 20%, rgba(139,92,246,0.04), transparent 60%),
-    radial-gradient(ellipse at 70% 80%, rgba(56,189,248,0.03), transparent 60%),
-    var(--surface-0);
-  border:1px solid var(--border-subtle);
-  border-radius:var(--radius);position:relative;overflow:hidden;
-}
-#graph-container::before{
-  content:'';position:absolute;inset:0;pointer-events:none;
-  background:
-    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
-  background-size:40px 40px;
-  z-index:0;
-}
-#graph-container canvas{border-radius:var(--radius)}
-#graph-controls{
-  position:absolute;top:12px;right:12px;z-index:10;
-  display:flex;flex-direction:column;gap:4px;
-}
-#graph-controls button{
-  background:rgba(5,5,8,0.85);backdrop-filter:blur(12px);
-  border:1px solid var(--border-default);color:var(--ink-secondary);
-  width:32px;height:32px;border-radius:50%;cursor:pointer;
-  font-size:12px;font-weight:500;font-family:inherit;line-height:1;
-  display:flex;align-items:center;justify-content:center;
-  transition:all var(--dur-fast) var(--ease);
-}
-#graph-controls button:hover{background:var(--accent);color:white;border-color:var(--accent);box-shadow:0 0 16px rgba(139,92,246,0.3)}
-#graph-legend{
-  position:absolute;bottom:12px;left:12px;z-index:10;
-  background:rgba(5,5,8,0.85);backdrop-filter:blur(12px) saturate(1.5);
-  border:1px solid var(--border-default);border-radius:var(--radius-sm);
-  padding:8px 12px;font-size:11px;display:flex;flex-direction:column;gap:3px;
-}
-.legend-item{display:flex;align-items:center;gap:8px;color:var(--ink-secondary)}
-.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.legend-box{width:8px;height:8px;border-radius:2px;flex-shrink:0}
-.legend-square{width:8px;height:8px;flex-shrink:0;border-radius:1px}
-.graph-empty{
-  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  text-align:center;color:var(--ink-tertiary);z-index:1;
-}
-.graph-empty .icon{font-size:36px;margin-bottom:8px;opacity:0.4}
-.graph-empty .label{font-size:14px;margin-bottom:4px}
-.graph-empty .hint{font-size:11px}
-
-/* ─── Memories ─── */
-.memories-toolbar{
-  display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;
-}
-.memories-toolbar input,.memories-toolbar select{
-  background:var(--surface-2);border:1px solid var(--border-default);
-  color:var(--ink-primary);padding:8px 12px;border-radius:var(--radius-xs);
-  font-size:13px;font-family:inherit;transition:all var(--dur-fast) var(--ease);
-}
-.memories-toolbar input::placeholder{color:var(--ink-placeholder)}
-.memories-toolbar input{flex:1;min-width:180px}
-.memories-toolbar input:focus,.memories-toolbar select:focus{
-  outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring);
-}
-.memories-toolbar select{cursor:pointer}
-
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  padding:8px 14px;border-radius:var(--radius-xs);font-size:13px;font-weight:500;
-  font-family:inherit;cursor:pointer;transition:all var(--dur-fast) var(--ease);
-  border:1px solid transparent;white-space:nowrap;
-}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:white}
-.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);box-shadow:0 0 20px rgba(139,92,246,0.3)}
-.btn-secondary{background:var(--surface-2);border-color:var(--border-default);color:var(--ink-primary)}
-.btn-secondary:hover{background:var(--surface-3);border-color:var(--border-strong)}
-.btn-success{background:var(--emerald);border-color:var(--emerald);color:#052e16}
-.btn-success:hover{box-shadow:0 0 20px rgba(52,211,153,0.3)}
-.btn-danger{background:var(--red);border-color:var(--red);color:white}
-.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-secondary)}
-.btn-ghost:hover{background:var(--surface-hover);color:var(--ink-primary)}
-.btn-sm{padding:5px 10px;font-size:11px}
-.btn-xs{padding:3px 8px;font-size:10px}
-
-/* Memory Cards */
-#memories-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
-.memory-card{
-  background:var(--surface-1);border:1px solid var(--border-subtle);
-  border-radius:var(--radius);padding:16px;cursor:pointer;
-  transition:all var(--dur) var(--ease);
-}
-.memory-card:hover{border-color:var(--border-accent);transform:translateY(-2px);box-shadow:0 8px 32px rgba(0,0,0,0.25),0 0 0 1px var(--border-accent)}
-.memory-card .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
-.memory-card .card-fact{
-  font-size:13px;line-height:1.55;color:var(--ink-primary);
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
-}
-.memory-card .card-meta{font-size:11px;color:var(--ink-tertiary);margin-top:8px}
-.memory-card .card-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
-.memory-card .card-tags span{background:var(--surface-2);padding:2px 7px;border-radius:4px;font-size:10px;color:var(--ink-tertiary)}
-.memory-card .card-actions{margin-top:8px;display:flex;gap:4px}
-
-/* ─── Search ─── */
-.search-box{display:flex;gap:8px;margin-bottom:20px}
-.search-box input{
-  flex:1;background:var(--surface-2);border:1px solid var(--border-default);
-  color:var(--ink-primary);padding:12px 16px;border-radius:var(--radius);
-  font-size:15px;font-family:inherit;transition:all var(--dur-fast) var(--ease);
-}
-.search-box input::placeholder{color:var(--ink-placeholder)}
-.search-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
-#search-results{display:flex;flex-direction:column;gap:10px}
-.search-result{
-  background:var(--surface-1);border:1px solid var(--border-subtle);
-  border-radius:var(--radius);padding:16px;
-  transition:all var(--dur-fast) var(--ease);
-}
-.search-result:hover{border-color:var(--border-default);transform:translateX(2px)}
-.search-result .result-source{font-size:11px;color:var(--ink-tertiary);margin-bottom:6px;font-family:var(--font-mono);word-break:break-all}
-.search-result .result-content{font-size:13px;line-height:1.6;color:var(--ink-primary);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-.search-result .result-score{font-size:11px;color:var(--emerald);margin-top:8px;font-variant-numeric:tabular-nums;font-weight:500}
-
-/* ─── Wiki ─── */
-.wiki-layout{display:flex;gap:14px;height:100%;min-height:0}
-.wiki-sidebar{
-  width:260px;flex-shrink:0;overflow-y:auto;
-  background:var(--surface-1);border:1px solid var(--border-subtle);
-  border-radius:var(--radius);padding:12px;
-}
-.wiki-sidebar input{
-  width:100%;background:var(--surface-2);border:1px solid var(--border-default);
-  color:var(--ink-primary);padding:8px 12px;border-radius:var(--radius-xs);
-  font-size:13px;margin-bottom:10px;font-family:inherit;
-  transition:all var(--dur-fast) var(--ease);
-}
-.wiki-sidebar input::placeholder{color:var(--ink-placeholder)}
-.wiki-sidebar input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
-.wiki-page-list{list-style:none;display:flex;flex-direction:column;gap:2px}
-.wiki-page-list li{
-  padding:8px 10px;font-size:13px;cursor:pointer;border-radius:var(--radius-xs);
-  transition:all var(--dur-fast) var(--ease);
-  border-left:2px solid transparent;color:var(--ink-secondary);
-}
-.wiki-page-list li:hover{background:var(--surface-2);color:var(--ink-primary);border-left-color:var(--border-strong)}
-.wiki-page-list li.active{background:var(--accent-glow);color:var(--accent-hover);border-left-color:var(--accent);font-weight:600}
-.wiki-page-list li .page-summary{font-size:10px;color:var(--ink-tertiary);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-
-.wiki-content{
-  flex:1;overflow-y:auto;background:var(--surface-1);
-  border:1px solid var(--border-subtle);border-radius:var(--radius);
-  padding:28px 32px;
-}
-.wiki-content h1{font-size:28px;font-weight:800;margin-bottom:16px;color:var(--accent);letter-spacing:-0.03em}
-.wiki-content h2{font-size:20px;font-weight:700;margin:24px 0 10px;color:var(--ink-primary);letter-spacing:-0.01em}
-.wiki-content h3{font-size:16px;font-weight:600;margin:16px 0 8px;color:var(--ink-primary)}
-.wiki-content p{font-size:14px;line-height:1.7;margin-bottom:10px;color:var(--ink-secondary)}
-.wiki-content blockquote{border-left:3px solid var(--accent);padding:10px 16px;margin:10px 0;background:var(--surface-2);font-size:13px;color:var(--ink-secondary);border-radius:0 var(--radius-xs) var(--radius-xs) 0}
-.wiki-content ul{font-size:13px;color:var(--ink-secondary);padding-left:20px;line-height:1.7}
-.wiki-content li{margin-bottom:4px}
-.wiki-content code{background:var(--surface-2);padding:2px 6px;border-radius:4px;font-size:12px;font-family:var(--font-mono)}
-.wiki-content a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent;transition:border-color var(--dur-fast)}
-.wiki-content a:hover{border-bottom-color:var(--accent)}
-
-.wiki-empty,.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--ink-tertiary);text-align:center;gap:8px;padding:40px}
-.wiki-empty .icon,.empty-state .icon{font-size:40px;opacity:0.3}
-.wiki-empty .text,.empty-state .text{font-size:14px}
-.wiki-empty .hint,.empty-state .hint{font-size:11px}
-
-/* ─── Modal ─── */
-.modal-overlay{
-  display:none;position:fixed;inset:0;
-  background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);
-  -webkit-backdrop-filter:blur(8px);z-index:1000;
-  align-items:center;justify-content:center;
-}
-.modal-overlay.open{display:flex;animation:overlayIn var(--dur-fast) var(--ease)}
-@keyframes overlayIn{from{opacity:0}to{opacity:1}}
-.modal{
-  background:var(--surface-1);border:1px solid var(--border-default);
-  border-radius:16px;padding:28px;width:520px;max-width:92vw;max-height:85vh;overflow-y:auto;
-  box-shadow:0 24px 80px rgba(0,0,0,0.5);
-  animation:modalIn var(--dur-slow) var(--ease-spring);
-}
-@keyframes modalIn{from{opacity:0;transform:translateY(12px) scale(0.97)}to{opacity:1;transform:none}}
-.modal .modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}
-.modal .modal-header h2{font-size:18px;font-weight:700;letter-spacing:-0.01em;margin:0}
-.modal h2{font-size:18px;font-weight:700;margin-bottom:20px;letter-spacing:-0.01em}
-.modal label{display:block;font-size:11px;font-weight:600;color:var(--ink-secondary);margin:16px 0 4px;letter-spacing:0.05em;text-transform:uppercase}
-.modal input,.modal textarea,.modal select{
-  width:100%;background:var(--surface-2);border:1px solid var(--border-default);
-  color:var(--ink-primary);padding:8px 12px;border-radius:var(--radius-xs);
-  font-size:13px;font-family:inherit;transition:all var(--dur-fast) var(--ease);
-}
-.modal textarea{min-height:80px;resize:vertical}
-.modal input:focus,.modal textarea:focus,.modal select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
-.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
-
-/* ─── Toast ─── */
-.toast-container{position:fixed;bottom:20px;right:20px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{
-  background:rgba(5,5,8,0.9);backdrop-filter:blur(12px);
-  border:1px solid var(--border-strong);color:var(--ink-primary);
-  padding:10px 16px;border-radius:var(--radius-sm);font-size:13px;
-  box-shadow:0 8px 32px rgba(0,0,0,0.4);
-  opacity:0;transform:translateY(8px) scale(0.95);
-  transition:all var(--dur) var(--ease);pointer-events:auto;
-  display:flex;align-items:center;gap:8px;
-}
-.toast.show{opacity:1;transform:none}
-.toast .toast-icon{
-  width:20px;height:20px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;
-}
-.toast.success .toast-icon{background:var(--emerald-glow);color:var(--emerald)}
-.toast.error .toast-icon{background:var(--red-glow);color:var(--red)}
-
-/* ─── Detail Sections ─── */
-.detail-section{margin-bottom:14px}
-.detail-section:last-child{margin-bottom:0}
-.detail-label{font-size:10px;font-weight:600;color:var(--ink-tertiary);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px}
-.detail-value{font-size:13px;color:var(--ink-primary);line-height:1.6}
-.detail-meta{display:flex;gap:14px;flex-wrap:wrap}
-.detail-meta-item{font-size:11px;color:var(--ink-tertiary)}
-.detail-storage{font-size:11px;font-family:var(--font-mono);background:var(--surface-2);padding:8px 12px;border-radius:var(--radius-xs);color:var(--ink-secondary);line-height:1.5}
-.detail-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
-.detail-tags span{background:var(--surface-2);padding:2px 7px;border-radius:4px;font-size:10px;color:var(--ink-tertiary)}
-.context-box{background:var(--surface-2);padding:10px 12px;border-radius:var(--radius-xs);border:1px solid var(--border-faint);font-size:12px;color:var(--ink-secondary);line-height:1.5;max-height:200px;overflow-y:auto}
-
-/* ─── Skeleton ─── */
-.skeleton{
-  background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);
-  background-size:200% 100%;animation:shimmer 1.5s ease-in-out infinite;border-radius:var(--radius-xs);
-}
-.skeleton-text{height:12px;width:100%;margin-bottom:6px;border-radius:4px}
-.skeleton-text.w40{width:40%}.skeleton-text.w60{width:60%}.skeleton-text.w80{width:80%}
-.skeleton-value{height:36px;width:50%;margin-bottom:4px}
-.skeleton-block{height:48px;width:100%}
-.skeleton-card{height:110px;border-radius:var(--radius)}
-@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-
-/* ─── Responsive ─── */
-@media(max-width:768px){
-  .stats-grid{grid-template-columns:repeat(2,1fr)}
-  .wiki-layout{flex-direction:column}
-  .wiki-sidebar{width:100%;max-height:200px}
-  #memories-list{grid-template-columns:1fr}
-  header{flex-wrap:wrap;gap:8px;padding:8px 12px}
-  nav{margin-left:0;width:100%;overflow-x:auto}
-  nav button{flex-shrink:0}
-  .modal{padding:20px;width:95vw}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 </style>
 </head>
 <body>
-<div class="ambient"></div>
 <div id="app">
-  <header>
-    <div class="logo">
-      <div class="logo-icon">🧠</div>
+
+  <nav id="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">A</div>
       <div>
-        <h1><span>Amnis</span></h1>
-        <div class="subtitle">Memory Graph</div>
+        <div class="brand-name">Amnis</div>
+        <div class="brand-ver" id="brand-version">v0.2.0</div>
       </div>
     </div>
-    <nav>
-      <button class="active" data-tab="dashboard">Dashboard</button>
-      <button data-tab="graph">Graph</button>
-      <button data-tab="memories">Memories</button>
-      <button data-tab="search">Search</button>
-      <button data-tab="wiki">Wiki</button>
-    </nav>
-  </header>
 
-  <main>
-    <!-- Dashboard -->
-    <div id="tab-dashboard" class="tab-content active">
-      <div class="stats-grid" id="stats-grid">
-        <div class="stat-card memory">
-          <div class="stat-glow"></div>
-          <div class="stat-top"><span class="stat-label">Memories</span><span class="stat-icon">🧠</span></div>
-          <div class="value" id="stat-memories"><div class="skeleton skeleton-value"></div></div>
-          <div class="sub" id="stat-mem-avg"><div class="skeleton skeleton-text w60"></div></div>
-        </div>
-        <div class="stat-card rag">
-          <div class="stat-glow"></div>
-          <div class="stat-top"><span class="stat-label">RAG Chunks</span><span class="stat-icon">🔍</span></div>
-          <div class="value" id="stat-chunks"><div class="skeleton skeleton-value"></div></div>
-          <div class="sub" id="stat-sources"><div class="skeleton skeleton-text w40"></div></div>
-        </div>
-        <div class="stat-card wiki">
-          <div class="stat-glow"></div>
-          <div class="stat-top"><span class="stat-label">Wiki Pages</span><span class="stat-icon">📖</span></div>
-          <div class="value" id="stat-wiki"><div class="skeleton skeleton-value"></div></div>
-          <div class="sub" id="stat-embed"><div class="skeleton skeleton-text w80"></div></div>
-        </div>
-        <div class="stat-card categories">
-          <div class="stat-glow"></div>
-          <div class="stat-top"><span class="stat-label">Categories</span><span class="stat-icon">🏷️</span></div>
-          <div class="value" id="stat-mem-by-cat"><div class="skeleton skeleton-value"></div></div>
-          <div class="sub" id="stat-notes"><div class="skeleton skeleton-text w60"></div></div>
-        </div>
+    <button class="nav-btn" data-view="dashboard" aria-current="page">
+      <span class="ico" aria-hidden="true">◈</span><span>Dashboard</span>
+    </button>
+    <button class="nav-btn" data-view="memories">
+      <span class="ico" aria-hidden="true">✦</span><span>Memories</span>
+      <span class="count" id="nav-count-memories"></span>
+    </button>
+    <button class="nav-btn" data-view="search">
+      <span class="ico" aria-hidden="true">⌕</span><span>Search</span>
+    </button>
+    <button class="nav-btn" data-view="graph">
+      <span class="ico" aria-hidden="true">⬡</span><span>Graph</span>
+    </button>
+    <button class="nav-btn" data-view="wiki">
+      <span class="ico" aria-hidden="true">▤</span><span>Wiki</span>
+      <span class="count" id="nav-count-wiki"></span>
+    </button>
+    <button class="nav-btn" data-view="episodes">
+      <span class="ico" aria-hidden="true">◷</span><span>Episodes</span>
+      <span class="count" id="nav-count-episodes"></span>
+    </button>
+
+    <div class="nav-sep"></div>
+
+    <button class="nav-btn" data-view="maintenance">
+      <span class="ico" aria-hidden="true">⚙</span><span>Maintenance</span>
+    </button>
+
+    <div class="sidebar-foot">
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">connecting…</span>
       </div>
-      <div class="activity-section">
-        <div class="activity-panel">
-          <div class="panel-header">
-            <span class="panel-title">Recent Memories</span>
-            <span class="panel-badge" id="recent-count"></span>
+    </div>
+  </nav>
+
+  <div id="main">
+    <header id="topbar">
+      <div>
+        <div id="view-title">Dashboard</div>
+        <div id="view-sub">Overview of every layer</div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <button class="btn btn-sm" id="open-palette">
+        <span aria-hidden="true">⌕</span> Commands <span class="kbd">Ctrl K</span>
+      </button>
+      <button class="btn btn-icon btn-sm" id="theme-toggle" title="Toggle theme" aria-label="Toggle colour theme">◐</button>
+      <button class="btn btn-primary btn-sm" id="new-memory-btn">
+        <span aria-hidden="true">＋</span> New memory
+      </button>
+    </header>
+
+    <main id="content">
+
+      <!-- ── Dashboard ─────────────────────────────────────────── -->
+      <section class="view active" id="view-dashboard" aria-label="Dashboard">
+        <div class="stats-grid" id="stats-grid"></div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Recent memories</h2>
+              <span class="panel-badge" id="recent-badge"></span>
+            </div>
+            <div class="panel-body"><ul class="compact-list" id="recent-list"></ul></div>
           </div>
-          <ul class="memory-list" id="recent-memories">
-            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px"></li>
-            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px"></li>
-            <li class="skeleton skeleton-block" style="border:none;margin-bottom:4px"></li>
-          </ul>
-        </div>
-        <div class="activity-panel">
-          <div class="panel-header"><span class="panel-title">Memory by Category</span></div>
-          <div class="category-chart" id="category-chart">
-            <div class="skeleton skeleton-block" style="margin-bottom:8px"></div>
-            <div class="skeleton skeleton-block" style="margin-bottom:8px"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Graph -->
-    <div id="tab-graph" class="tab-content">
-      <div id="graph-container">
-        <div id="graph-controls">
-          <button onclick="fitGraph()" title="Fit">⊞</button>
-          <button onclick="resetGraph()" title="Reset">⟲</button>
-          <button onclick="refreshGraph()" title="Refresh">↻</button>
-        </div>
-        <div id="graph-legend">
-          <div class="legend-item"><span class="legend-dot" style="background:var(--emerald)"></span> Memory</div>
-          <div class="legend-item"><span class="legend-box" style="background:var(--accent)"></span> Wiki Page</div>
-          <div class="legend-item"><span class="legend-square" style="background:var(--sky)"></span> Document</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Memories -->
-    <div id="tab-memories" class="tab-content">
-      <div class="memories-toolbar">
-        <input type="text" id="mem-search" placeholder="Search memories..." onkeydown="if(event.key==='Enter')loadMemories()">
-        <select id="mem-category">
-          <option value="">All Categories</option>
-          <option value="preference">Preference</option>
-          <option value="fact">Fact</option>
-          <option value="event">Event</option>
-          <option value="procedure">Procedure</option>
-          <option value="concept">Concept</option>
-          <option value="meta">Meta</option>
-        </select>
-        <button class="btn btn-primary" onclick="loadMemories()">Search</button>
-        <button class="btn btn-success" onclick="showNewMemoryModal()">+ New Memory</button>
-      </div>
-      <div id="memories-list">
-        <div class="skeleton skeleton-card"></div>
-        <div class="skeleton skeleton-card"></div>
-        <div class="skeleton skeleton-card"></div>
-      </div>
-    </div>
-
-    <!-- Search -->
-    <div id="tab-search" class="tab-content">
-      <div class="search-box">
-        <input type="text" id="rag-query" placeholder="Ask anything in your notes..." onkeydown="if(event.key==='Enter')doSearch()">
-        <button class="btn btn-primary" onclick="doSearch()">Search</button>
-      </div>
-      <div id="search-results"></div>
-    </div>
-
-    <!-- Wiki -->
-    <div id="tab-wiki" class="tab-content">
-      <div class="wiki-layout">
-        <div class="wiki-sidebar">
-          <input type="text" id="wiki-search" placeholder="Search wiki pages..." onkeydown="if(event.key==='Enter')loadWiki()">
-          <ul class="wiki-page-list" id="wiki-page-list">
-            <li class="skeleton skeleton-text" style="border:none;margin-bottom:6px"></li>
-            <li class="skeleton skeleton-text w80" style="border:none;margin-bottom:6px"></li>
-            <li class="skeleton skeleton-text" style="border:none;margin-bottom:6px"></li>
-          </ul>
-        </div>
-        <div class="wiki-content" id="wiki-content">
-          <div class="wiki-empty">
-            <div class="icon">📖</div>
-            <div class="text">Select a wiki page from the sidebar</div>
+          <div class="panel">
+            <div class="panel-head"><h2>By category</h2></div>
+            <div class="panel-body" id="category-chart"></div>
           </div>
         </div>
-      </div>
-    </div>
-  </main>
+      </section>
+
+      <!-- ── Memories ──────────────────────────────────────────── -->
+      <section class="view" id="view-memories" aria-label="Memories">
+        <div class="toolbar">
+          <input class="input grow" id="mem-search" type="search" placeholder="Search memories by meaning or keyword…" aria-label="Search memories">
+          <select class="select" id="mem-category" style="width:auto" aria-label="Filter by category">
+            <option value="">All categories</option>
+          </select>
+          <select class="select" id="mem-importance" style="width:auto" aria-label="Minimum importance">
+            <option value="0">Any importance</option>
+            <option value="5">5+</option>
+            <option value="7">7+</option>
+            <option value="9">9+</option>
+          </select>
+          <button class="btn" id="mem-search-btn">Search</button>
+          <button class="btn" id="mem-clear-btn">Clear</button>
+        </div>
+        <div id="memories-list"></div>
+      </section>
+
+      <!-- ── Search ────────────────────────────────────────────── -->
+      <section class="view" id="view-search" aria-label="Document search">
+        <div class="toolbar">
+          <input class="input grow" id="rag-query" type="search" placeholder="Ask anything across your indexed notes…" aria-label="Search documents">
+          <div class="segmented" id="search-mode" role="group" aria-label="Search mode">
+            <button data-mode="hybrid" aria-pressed="true">Hybrid</button>
+            <button data-mode="semantic" aria-pressed="false">Semantic</button>
+            <button data-mode="keyword" aria-pressed="false">Keyword</button>
+          </div>
+          <button class="btn btn-primary" id="rag-search-btn">Search</button>
+        </div>
+        <div id="search-results"></div>
+      </section>
+
+      <!-- ── Graph ─────────────────────────────────────────────── -->
+      <section class="view" id="view-graph" aria-label="Knowledge graph">
+        <div class="toolbar">
+          <div class="segmented" id="graph-filter" role="group" aria-label="Filter node types">
+            <button data-group="memory" aria-pressed="true">Memories</button>
+            <button data-group="wiki" aria-pressed="true">Wiki</button>
+            <button data-group="document" aria-pressed="true">Documents</button>
+          </div>
+          <div class="topbar-spacer"></div>
+          <button class="btn btn-sm" id="graph-fit">Fit</button>
+          <button class="btn btn-sm" id="graph-reheat">Re-layout</button>
+          <button class="btn btn-sm" id="graph-refresh">Refresh</button>
+        </div>
+        <div id="graph-wrap">
+          <canvas id="graph-canvas"></canvas>
+          <div class="graph-overlay tl">
+            <div class="graph-legend">
+              <div class="legend-item"><span class="legend-swatch" style="background:var(--emerald)"></span> Memory</div>
+              <div class="legend-item"><span class="legend-swatch box" style="background:var(--accent)"></span> Wiki page</div>
+              <div class="legend-item"><span class="legend-swatch box" style="background:var(--sky)"></span> Document</div>
+            </div>
+          </div>
+          <div id="graph-tip" role="tooltip"></div>
+          <div id="graph-hud">—</div>
+        </div>
+      </section>
+
+      <!-- ── Wiki ──────────────────────────────────────────────── -->
+      <section class="view" id="view-wiki" aria-label="Wiki">
+        <div class="toolbar">
+          <input class="input grow" id="wiki-search" type="search" placeholder="Filter wiki pages…" aria-label="Filter wiki pages">
+          <button class="btn" id="wiki-lint-btn">Lint</button>
+          <button class="btn btn-primary" id="wiki-compile-btn">Compile</button>
+        </div>
+        <div class="wiki-layout">
+          <div class="panel"><ul class="wiki-list" id="wiki-list"></ul></div>
+          <div class="panel"><div class="wiki-doc" id="wiki-doc"></div></div>
+        </div>
+      </section>
+
+      <!-- ── Episodes ──────────────────────────────────────────── -->
+      <section class="view" id="view-episodes" aria-label="Episodes">
+        <div class="toolbar">
+          <select class="select" id="episode-session" style="width:auto" aria-label="Filter by session">
+            <option value="">All sessions</option>
+          </select>
+          <input class="input grow" id="episode-topic" type="search" placeholder="Filter by topic…" aria-label="Filter by topic">
+          <button class="btn" id="episode-refresh">Refresh</button>
+        </div>
+        <div class="panel"><div class="panel-body"><ul class="compact-list" id="episode-list"></ul></div></div>
+      </section>
+
+      <!-- ── Maintenance ───────────────────────────────────────── -->
+      <section class="view" id="view-maintenance" aria-label="Maintenance">
+        <div class="grid-2" id="maintenance-grid"></div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head"><h2>Last result</h2></div>
+          <div class="panel-body"><pre class="detail-value mono" id="maintenance-output" style="margin:0">Run an action to see its output.</pre></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
 </div>
 
-<div class="toast-container" id="toast-container"></div>
-
-<!-- New Memory Modal -->
-<div class="modal-overlay" id="new-memory-modal">
-  <div class="modal">
-    <h2>New Memory</h2>
-    <label>Fact</label>
-    <textarea id="modal-fact" placeholder="What do you want to remember?"></textarea>
-    <label>Category</label>
-    <select id="modal-category">
-      <option value="fact">Fact</option>
-      <option value="preference">Preference</option>
-      <option value="event">Event</option>
-      <option value="procedure">Procedure</option>
-      <option value="concept">Concept</option>
-      <option value="meta">Meta</option>
-      <option value="general">General</option>
-    </select>
-    <label>Importance (1-10)</label>
-    <input type="number" id="modal-importance" value="5" min="1" max="10">
-    <label>Tags (comma separated)</label>
-    <input type="text" id="modal-tags" placeholder="e.g. writing, linux, setup">
-    <div class="modal-actions">
-      <button class="btn btn-secondary" onclick="closeNewMemoryModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveNewMemory()">Save</button>
+<!-- ── Memory editor ───────────────────────────────────────────── -->
+<div class="modal-backdrop" id="editor-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editor-title">
+    <div class="modal-head">
+      <h2 id="editor-title">New memory</h2>
+      <button class="close-x" data-close="editor-backdrop" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="ed-fact">Fact</label>
+        <textarea class="textarea" id="ed-fact" placeholder="What should Amnis remember?"></textarea>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="ed-category">Category</label>
+          <select class="select" id="ed-category"></select>
+        </div>
+        <div class="field">
+          <label for="ed-importance">Importance <span class="hint" id="ed-importance-out">5</span></label>
+          <input class="input" id="ed-importance" type="range" min="1" max="10" value="5">
+        </div>
+      </div>
+      <div class="field">
+        <label for="ed-tags">Tags</label>
+        <input class="input" id="ed-tags" placeholder="comma, separated, tags">
+      </div>
+      <div class="field">
+        <label for="ed-context">Context <span class="hint">optional</span></label>
+        <input class="input" id="ed-context" placeholder="Where this came from">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close="editor-backdrop">Cancel</button>
+      <button class="btn btn-primary" id="ed-save">Save</button>
     </div>
   </div>
 </div>
 
-<!-- Memory Detail Modal -->
-<div class="modal-overlay" id="memory-detail-modal">
-  <div class="modal" style="max-width:600px">
-    <div class="modal-header">
-      <h2>Memory Details</h2>
-      <button class="btn btn-ghost btn-sm" onclick="closeMemoryDetailModal()" style="font-size:16px">✕</button>
+<!-- ── Detail ──────────────────────────────────────────────────── -->
+<div class="modal-backdrop" id="detail-backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <div class="modal-head">
+      <h2 id="detail-title">Details</h2>
+      <button class="close-x" data-close="detail-backdrop" aria-label="Close">×</button>
     </div>
-    <div id="memory-detail-content">
-      <div class="skeleton skeleton-block" style="margin-bottom:12px"></div>
-      <div class="skeleton skeleton-text w80" style="margin-bottom:8px"></div>
-      <div class="skeleton skeleton-text"></div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary btn-sm" onclick="closeMemoryDetailModal()">Close</button>
-      <button class="btn btn-ghost btn-sm" id="memory-detail-source-btn" onclick="" style="display:none">View Wiki Source</button>
-      <button class="btn btn-primary btn-sm" id="memory-detail-edit-btn" onclick="editMemoryFromDetail()">Edit</button>
-      <button class="btn btn-danger btn-sm" id="memory-detail-delete-btn" onclick="deleteMemoryFromDetail()">Delete</button>
-    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-foot" id="detail-actions"></div>
   </div>
 </div>
 
+<!-- ── Command palette ─────────────────────────────────────────── -->
+<div class="modal-backdrop" id="palette-backdrop">
+  <div class="modal" id="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input class="input" id="palette-input" placeholder="Type a command or search…" autocomplete="off">
+    <ul id="palette-results" role="listbox"></ul>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
 <script>
-// ─── State ───
-let network = null;
-let graphData = { nodes: [], edges: [] };
-let currentTab = 'dashboard';
-let currentMemoryId = null;
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════
+   Amnis dashboard.
 
-// ─── Toast ───
-function showToast(msg, type) {
-  type = type || 'success';
-  const c = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  t.className = 'toast ' + type;
-  t.innerHTML = '<span class="toast-icon">' + (type === 'success' ? '✓' : '✕') + '</span>' + msg;
-  c.appendChild(t);
-  requestAnimationFrame(() => t.classList.add('show'));
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 3000);
+   Every piece of server data reaches the DOM through el()/text nodes.
+   There is no innerHTML interpolation anywhere in this file — the 0.1 UI
+   built markup by concatenating memory text, wiki content, source paths and
+   error messages into innerHTML, so any of those could execute script.
+   ═══════════════════════════════════════════════════════════════════ */
+
+const CATEGORIES = ['preference','fact','event','procedure','concept','theme','meta','general'];
+const CAT_COLOR = c => getComputedStyle(document.documentElement)
+  .getPropertyValue('--cat-' + (CATEGORIES.includes(c) ? c : 'general')).trim() || '#94a3b8';
+
+/* ── DOM helpers ───────────────────────────────────────────────── */
+
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === 'class') node.className = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+    else if (k === 'dataset') Object.assign(node.dataset, v);
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+    else node.setAttribute(k, v === true ? '' : String(v));
+  }
+  for (const child of children.flat(4)) {
+    if (child === null || child === undefined || child === false || child === '') continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+function fill(node, ...children) { clear(node); node.append(...children.flat(4).filter(c => c !== null && c !== undefined && c !== false)); return node; }
+
+function toast(message, kind) {
+  const node = el('div', { class: 'toast ' + (kind || '') }, String(message));
+  $('#toasts').append(node);
+  setTimeout(() => { node.style.opacity = '0'; setTimeout(() => node.remove(), 220); }, kind === 'err' ? 6000 : 3200);
 }
 
-// ─── Escape HTML ───
-function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function skeletons(count, cls) {
+  return Array.from({ length: count }, () => el('div', { class: 'skeleton ' + (cls || 'sk-card') }));
+}
 
-// ─── Tab Navigation ───
-document.querySelectorAll('nav button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
-    currentTab = btn.dataset.tab;
-    if (currentTab === 'graph') setTimeout(initGraph, 100);
-    if (currentTab === 'dashboard') loadDashboard();
-    if (currentTab === 'memories') loadMemories();
-    if (currentTab === 'wiki') loadWiki();
-  });
-});
+function emptyState(icon, title, detail) {
+  return el('div', { class: 'empty' },
+    el('div', { class: 'em-ico' }, icon),
+    el('div', { class: 'em-title' }, title),
+    detail ? el('div', {}, detail) : null);
+}
 
-// ─── Dashboard ───
+function relTime(iso) {
+  if (!iso) return '—';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '—';
+  const secs = Math.max(0, (Date.now() - then) / 1000);
+  if (secs < 60) return 'just now';
+  const units = [[60, 'm'], [3600, 'h'], [86400, 'd'], [2592000, 'mo'], [31536000, 'y']];
+  let last = 'm', div = 60;
+  for (const [s, label] of units) { if (secs >= s) { div = s; last = label; } }
+  return Math.floor(secs / div) + last + ' ago';
+}
+
+/* ── API ───────────────────────────────────────────────────────── */
+
+const TOKEN_KEY = 'amnis.token';
+function authHeaders() {
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token ? { 'X-Amnis-Token': token } : {};
+}
+
+async function api(path, options) {
+  const opts = Object.assign({ headers: {} }, options || {});
+  opts.headers = Object.assign({}, authHeaders(), opts.headers);
+  if (opts.body !== undefined && typeof opts.body !== 'string') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(path, opts);
+  let payload = null;
+  try { payload = await res.json(); } catch (_) { /* empty body is fine */ }
+  if (!res.ok) {
+    let detail = (payload && payload.detail) || res.statusText || ('HTTP ' + res.status);
+    if (Array.isArray(detail)) {
+      detail = detail.map(d => (d.loc ? d.loc.slice(-1)[0] + ': ' : '') + d.msg).join('; ');
+    }
+    if (res.status === 401) detail = 'Unauthorised — set an API token via the command palette.';
+    const err = new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    err.status = res.status;
+    throw err;
+  }
+  return payload;
+}
+
+/* ── Shared renderers ──────────────────────────────────────────── */
+
+function importanceBar(n) {
+  const bar = el('span', { class: 'imp-bar', title: 'Importance ' + n + '/10' });
+  for (let i = 1; i <= 10; i++) bar.append(el('i', { class: i <= n ? 'on' : '' }));
+  return bar;
+}
+
+function categoryBadge(cat) {
+  return el('span', { class: 'badge', style: { background: CAT_COLOR(cat) } }, cat || 'general');
+}
+
+function memoryCard(memory) {
+  return el('div', {
+    class: 'mem-card', tabindex: '0', role: 'button',
+    onclick: () => showMemoryDetail(memory.id),
+    onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showMemoryDetail(memory.id); } },
+  },
+    el('div', { class: 'text' }, memory.fact),
+    el('div', { class: 'mem-meta' },
+      categoryBadge(memory.category),
+      importanceBar(memory.importance),
+      el('span', {}, relTime(memory.timestamp)),
+      memory.access_count ? el('span', {}, '· ' + memory.access_count + ' recalls') : null,
+      (memory.tags || []).slice(0, 5).map(t => el('span', { class: 'tag' }, t))));
+}
+
+/* ── Dashboard ─────────────────────────────────────────────────── */
+
+let cachedStatus = null;
+
+function statCard(label, value, sub) {
+  return el('div', { class: 'stat' },
+    el('div', { class: 'label' }, label),
+    el('div', { class: 'value' }, value),
+    el('div', { class: 'sub' }, sub));
+}
+
 async function loadDashboard() {
+  fill($('#stats-grid'), skeletons(4, 'sk-card'));
+  fill($('#recent-list'), skeletons(4, 'sk-line'));
+
+  let status;
   try {
-    const res = await fetch('/api/status');
-    const data = await res.json();
-    document.getElementById('stat-memories').textContent = data.memory.total_memories;
-    document.getElementById('stat-mem-avg').textContent = 'avg importance: ' + data.memory.avg_importance;
-    document.getElementById('stat-chunks').textContent = data.rag.total_chunks || 0;
-    document.getElementById('stat-sources').textContent = 'sources: ' + (data.rag.unique_sources || 0);
-    document.getElementById('stat-wiki').textContent = data.wiki.total_pages;
-    document.getElementById('stat-embed').textContent = 'model: ' + data.config.embedding_model;
-    document.getElementById('stat-mem-by-cat').textContent = Object.keys(data.memory.by_category || {}).length;
-    document.getElementById('stat-notes').textContent = 'notes: ' + data.config.notes_dir.split('/').pop();
+    status = cachedStatus = await api('/api/status');
+  } catch (err) {
+    fill($('#stats-grid'), emptyState('⚠', 'Could not reach the Amnis API', err.message));
+    setStatus('err', 'offline');
+    return;
+  }
 
-    const cats = data.memory.by_category || {};
-    document.getElementById('recent-count').textContent = Object.keys(cats).length + ' types';
+  const mem = status.memory || {}, rag = status.rag || {}, wiki = status.wiki || {}, ep = status.episodic || {};
+  const degraded = status.status === 'degraded';
+  setStatus(degraded ? 'warn' : '', degraded ? 'degraded' : 'operational');
+  if (degraded) {
+    for (const [layer, message] of Object.entries(status.errors || {})) toast(layer + ': ' + message, 'err');
+  }
 
-    const memRes = await fetch('/api/memories?limit=8');
-    const memData = await memRes.json();
-    const list = document.getElementById('recent-memories');
-    list.innerHTML = '';
-    (memData.memories || []).forEach(m => {
-      const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
-      const li = document.createElement('li');
-      li.innerHTML = '<span class="cat-badge" style="background:' + (colors[m.category]||'var(--cat-general)') + '">' + m.category + '</span><span class="fact-text">' + m.fact + '</span><span class="importance-chip">' + m.importance + '/10</span>';
-      li.addEventListener('click', () => showMemoryDetailModal(m.id));
-      list.appendChild(li);
-    });
-    renderCategoryChart(cats);
-  } catch (e) {
-    document.getElementById('recent-memories').innerHTML = '<li style="color:var(--red)">Error loading</li>';
+  fill($('#stats-grid'),
+    statCard('Memories', mem.total_memories ?? 0,
+      'avg importance ' + (mem.avg_importance ?? '—') + ' · ' + (mem.keyword_indexed ?? 0) + ' indexed'),
+    statCard('Indexed chunks', rag.total_chunks ?? 0,
+      (rag.unique_sources ?? 0) + ' sources · ' + (rag.embedding_model || '—')),
+    statCard('Wiki pages', wiki.total_pages ?? 0,
+      (wiki.total_sources ?? 0) + ' distinct sources'),
+    statCard('Episodes', ep.total_episodes ?? 0,
+      (ep.unique_sessions ?? 0) + ' sessions'));
+
+  $('#nav-count-memories').textContent = mem.total_memories ?? '';
+  $('#nav-count-wiki').textContent = wiki.total_pages ?? '';
+  $('#nav-count-episodes').textContent = ep.total_episodes ?? '';
+
+  renderCategoryChart(mem.by_category || {});
+
+  try {
+    const data = await api('/api/memories?limit=8');
+    const list = data.memories || [];
+    $('#recent-badge').textContent = list.length ? list.length + ' shown' : '';
+    fill($('#recent-list'), list.length
+      ? list.map(m => el('li', { onclick: () => showMemoryDetail(m.id) },
+          el('span', { class: 'li-text' }, m.fact),
+          el('span', { class: 'li-side' }, relTime(m.timestamp))))
+      : emptyState('✦', 'No memories yet', 'Store one with the New memory button.'));
+  } catch (err) {
+    fill($('#recent-list'), emptyState('⚠', 'Could not load memories', err.message));
   }
 }
 
 function renderCategoryChart(byCategory) {
-  const c = document.getElementById('category-chart');
-  const entries = Object.entries(byCategory);
-  if (!entries.length) { c.innerHTML = '<div class="empty-state"><div class="text">No memories yet</div></div>'; return; }
-  const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
-  const total = entries.reduce((s, e) => s + e[1], 0);
-  let bars = '';
-  for (const [cat, count] of entries) {
-    const pct = (count / total) * 100;
-    bars += '<div class="chart-bar-row"><span class="chart-bar-label">' + cat + '</span><div class="chart-bar-track"><div class="chart-bar-fill" style="width:' + pct + '%;background:' + (colors[cat]||'var(--cat-general)') + '"></div></div><span class="chart-bar-count">' + count + '</span></div>';
-  }
-  c.innerHTML = bars;
+  const entries = Object.entries(byCategory).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) { fill($('#category-chart'), emptyState('◔', 'Nothing to chart yet')); return; }
+  const max = Math.max(...entries.map(e => e[1]));
+  fill($('#category-chart'), entries.map(([cat, count]) => el('div', { class: 'bar-row' },
+    el('span', { class: 'name' }, cat),
+    el('div', { class: 'bar-track' },
+      el('div', { class: 'bar-fill', style: { width: (count / max * 100) + '%', background: CAT_COLOR(cat) } })),
+    el('span', { class: 'num' }, count))));
 }
 
-// ─── Graph ───
-async function initGraph() {
-  const container = document.getElementById('graph-container');
-  if (!container) return;
-  if (network) { network.destroy(); network = null; }
-  container.innerHTML = '<div id="graph-controls"><button onclick="fitGraph()" title="Fit">⊞</button><button onclick="resetGraph()" title="Reset">⟲</button><button onclick="refreshGraph()" title="Refresh">↻</button></div><div id="graph-legend"><div class="legend-item"><span class="legend-dot" style="background:var(--emerald)"></span> Memory</div><div class="legend-item"><span class="legend-box" style="background:var(--accent)"></span> Wiki Page</div><div class="legend-item"><span class="legend-square" style="background:var(--sky)"></span> Document</div></div>';
-  await new Promise(r => setTimeout(r, 50));
-  await refreshGraph();
+function setStatus(kind, text) {
+  $('#status-dot').className = 'status-dot ' + (kind || '');
+  $('#status-text').textContent = text;
 }
 
-async function refreshGraph() {
-  try {
-    const res = await fetch('/api/graph');
-    graphData = await res.json();
-  } catch (e) {
-    showToast('Error loading graph: ' + e.message, 'error');
-    return;
-  }
-  if (!graphData.nodes || graphData.nodes.length === 0) {
-    document.getElementById('graph-container').innerHTML += '<div class="graph-empty"><div class="icon">🕸️</div><div class="label">No graph data yet</div><div class="hint">Add memories and index your notes to see connections</div></div>';
-    return;
-  }
-  const container = document.getElementById('graph-container');
-  const options = {
-    nodes: {
-      font: { size: 10, color: 'rgba(255,255,255,0.7)', face: 'Inter', strokeWidth: 2, strokeColor: 'rgba(5,5,8,0.8)' },
-      borderWidth: 0,
-      borderWidthSelected: 2,
-      scaling: { min: 14, max: 36 },
-    },
-    edges: {
-      smooth: { type: 'dynamic' },
-      arrows: { to: { enabled: false } },
-      color: { color: 'rgba(255,255,255,0.04)', highlight: 'rgba(139,92,246,0.3)', hover: 'rgba(139,92,246,0.2)', inherit: false },
-      width: 0.5,
-      hoverWidth: 2,
-      selectionWidth: 1.5,
-    },
-    physics: {
-      solver: 'forceAtlas2Based',
-      forceAtlas2Based: {
-        gravitationalConstant: -60,
-        centralGravity: 0.001,
-        springLength: 200,
-        springConstant: 0.005,
-        damping: 0.5,
-        avoidOverlap: 0.8,
-      },
-      stabilization: { iterations: 200, updateInterval: 50 },
-      adaptiveTimestep: true,
-    },
-    interaction: {
-      hover: true,
-      tooltipDelay: 200,
-      zoomView: true,
-      dragView: true,
-      hideEdgesOnDrag: true,
-      hideEdgesOnZoom: true,
-    },
-    groups: {
-      memory: {
-        shape: 'dot',
-        color: { background: '#34d399', border: '#6ee7b7', highlight: { background: '#6ee7b7', border: '#a7f3d0' } },
-        font: { color: 'rgba(255,255,255,0.65)' },
-        size: 20,
-      },
-      wiki: {
-        shape: 'box',
-        color: { background: '#8b5cf6', border: '#a78bfa', highlight: { background: '#a78bfa', border: '#c4b5fd' } },
-        font: { color: 'rgba(255,255,255,0.9)', face: 'Inter', size: 11 },
-        size: 24,
-        shapeProperties: { borderRadius: 6 },
-      },
-      document: {
-        shape: 'square',
-        color: { background: '#38bdf8', border: '#7dd3fc', highlight: { background: '#7dd3fc', border: '#bae6fd' } },
-        font: { color: 'rgba(255,255,255,0.65)' },
-        size: 18,
-      },
-    },
-  };
-  try {
-    network = new vis.Network(container, graphData, options);
-    network.on('click', function(params) {
-      if (params.nodes.length > 0) {
-        const nodeId = params.nodes[0];
-        const node = graphData.nodes.find(n => n.id === nodeId);
-        if (node && node.data) {
-          if (node.group === 'memory' && node.data.id) showMemoryDetailModal(node.data.id);
-          else if (node.group === 'wiki' && node.data.id) showWikiDetailModal(node.data.id);
-          else if (node.group === 'document' && node.data.title) showDocumentDetailModal(node.data.title, node.data);
-          else showToast(node.group + ': ' + (node.data.fact || node.data.title || node.label));
-        }
-      }
-    });
-    network.on('stabilizationIterationsDone', () => network.fit());
-  } catch (e) {
-    showToast('Graph error: ' + e.message, 'error');
-  }
-}
-function fitGraph() { if (network) network.fit(); }
-function resetGraph() { if (network) { network.setData(graphData); network.fit(); } }
+/* ── Memories ──────────────────────────────────────────────────── */
 
-// ─── Memories ───
 async function loadMemories() {
-  const query = document.getElementById('mem-search').value;
-  const category = document.getElementById('mem-category').value;
-  let url = '/api/memories?limit=100';
-  if (query) url += '&query=' + encodeURIComponent(query);
-  if (category) url += '&category=' + encodeURIComponent(category);
+  const target = $('#memories-list');
+  fill(target, skeletons(5));
+  const params = new URLSearchParams({ limit: '100' });
+  const query = $('#mem-search').value.trim();
+  const category = $('#mem-category').value;
+  const importance = $('#mem-importance').value;
+  if (query) params.set('query', query);
+  if (category) params.set('category', category);
+  if (importance !== '0') params.set('min_importance', importance);
+
   try {
-    const res = await fetch(url);
-    const data = await res.json();
-    const container = document.getElementById('memories-list');
-    container.innerHTML = '';
-    if (!data.memories || data.memories.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="icon">🧠</div><div class="text">No memories found</div><div class="hint">Create one with the + New Memory button</div></div>';
-      return;
-    }
-    const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
-    data.memories.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'memory-card';
-      const source = m.source || '—';
-      const isWikiSource = source.includes('wiki') || source.includes('Wiki');
-      const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
-      card.innerHTML = '<div class="card-header"><span class="cat-badge" style="background:' + (colors[m.category]||'var(--cat-general)') + '">' + m.category + '</span><span style="font-size:11px;color:var(--ink-tertiary)">' + m.importance + '/10 · ' + (m.timestamp?.slice(0,10)||'') + '</span></div><div class="card-fact">' + m.fact + '</div><div class="card-meta">source: ' + source + ' · confidence: ' + (m.confidence || '—') + '</div>' + (m.tags?.length ? '<div class="card-tags">' + m.tags.map(t => '<span>#' + t + '</span>').join('') + '</div>' : '') + ((isWikiSource || isDocSource) ? '<div class="card-actions"><button class="btn btn-ghost btn-xs" style="background:var(--sky-glow);color:var(--sky)" onclick="event.stopPropagation();openWikiSource(\'' + source.replace(/'/g, "\\'") + '\')">View Source</button></div>' : '');
-      card.addEventListener('click', () => showMemoryDetailModal(m.id));
-      container.appendChild(card);
-    });
-  } catch (e) {
-    document.getElementById('memories-list').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>';
+    const data = await api('/api/memories?' + params);
+    const list = data.memories || [];
+    fill(target, list.length
+      ? [el('div', { class: 'mem-meta', style: { marginBottom: '12px' } },
+          el('span', {}, list.length + ' of ' + (data.grand_total ?? list.length) + ' memories')),
+         ...list.map(memoryCard)]
+      : emptyState('⌕', 'No matches', query ? 'Try fewer or different words.' : 'Store your first memory.'));
+  } catch (err) {
+    fill(target, emptyState('⚠', 'Search failed', err.message));
   }
 }
 
-// ─── Memory Detail Modal ───
-function showMemoryDetailModal(memoryId) {
-  currentMemoryId = memoryId;
-  const modal = document.getElementById('memory-detail-modal');
-  const content = document.getElementById('memory-detail-content');
-  content.innerHTML = '<div class="skeleton skeleton-block" style="margin-bottom:12px"></div><div class="skeleton skeleton-text w80" style="margin-bottom:8px"></div><div class="skeleton skeleton-text"></div>';
-  modal.classList.add('open');
-  fetch('/api/memories/' + memoryId)
-    .then(r => r.json())
-    .then(m => {
-      if (m.error || !m.id) { content.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Memory not found</div></div>'; return; }
-      const colors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
-      const color = colors[m.category] || 'var(--cat-general)';
-      const source = m.source || '—';
-      const isWikiSource = source.includes('wiki') || source.includes('Wiki');
-      const isDocSource = source.includes('/') || source.includes('\\') || source.endsWith('.md') || source.endsWith('.txt');
-      content.innerHTML = '<div class="detail-section"><span class="cat-badge" style="background:' + color + ';font-size:11px;padding:3px 10px">' + m.category + '</span><span style="margin-left:8px;font-size:12px;color:var(--ink-tertiary)">Importance: ' + m.importance + '/10</span></div><div class="detail-section"><div class="detail-value" style="font-size:14px;white-space:pre-wrap">' + escapeHtml(m.fact) + '</div></div><div class="detail-section"><div class="detail-meta"><span class="detail-meta-item">Created: ' + (m.timestamp ? new Date(m.timestamp).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Unknown') + '</span><span class="detail-meta-item">Source: ' + escapeHtml(source) + '</span><span class="detail-meta-item">Confidence: ' + (m.confidence || '—') + '</span></div></div>' + (m.tags && m.tags.length ? '<div class="detail-section"><div class="detail-label">Tags</div><div class="detail-tags">' + m.tags.map(t => '<span>#' + escapeHtml(t) + '</span>').join('') + '</div></div>' : '') + (m.context ? '<div class="detail-section"><div class="detail-label">Context</div><div class="context-box">' + escapeHtml(m.context) + '</div></div>' : '') + '<div class="detail-section" style="padding-top:12px;border-top:1px solid var(--border-faint)"><div class="detail-label">Storage</div><div class="detail-storage">SQLite database → memory.db</div></div>';
-      const sourceBtn = document.getElementById('memory-detail-source-btn');
-      if (sourceBtn) { if (isWikiSource || isDocSource) { sourceBtn.style.display = 'inline-flex'; sourceBtn.onclick = () => openWikiSource(source); } else { sourceBtn.style.display = 'none'; } }
-    })
-    .catch(e => { content.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>'; });
-}
-function closeMemoryDetailModal() { document.getElementById('memory-detail-modal').classList.remove('open'); currentMemoryId = null; }
+/* ── Document search ───────────────────────────────────────────── */
 
-function openWikiSource(source) {
-  fetch('/api/wiki')
-    .then(r => r.json())
-    .then(data => {
-      const pages = data.pages || [];
-      let match = pages.find(p => p.title.toLowerCase() === source.toLowerCase());
-      if (!match) match = pages.find(p => p.title.toLowerCase().includes(source.toLowerCase()) || source.toLowerCase().includes(p.title.toLowerCase()));
-      if (!match) match = pages.find(p => (p.sources || []).some(s => s.includes(source) || source.includes(s)));
-      if (match) {
-        loadWikiPage(match.id);
-        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-        document.querySelector('nav button[data-tab="wiki"]').classList.add('active');
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        document.getElementById('tab-wiki').classList.add('active');
-        currentTab = 'wiki';
-        closeMemoryDetailModal();
-      } else {
-        showToast('No wiki page found for: ' + source, 'error');
-      }
-    })
-    .catch(e => showToast('Error: ' + e.message, 'error'));
-}
+let searchMode = 'hybrid';
 
-function editMemoryFromDetail() {
-  closeMemoryDetailModal();
-  if (currentMemoryId) {
-    fetch('/api/memories/' + currentMemoryId)
-      .then(r => r.json())
-      .then(m => {
-        if (m.id) {
-          document.getElementById('modal-fact').value = m.fact;
-          document.getElementById('modal-category').value = m.category;
-          document.getElementById('modal-importance').value = m.importance;
-          document.getElementById('modal-tags').value = (m.tags || []).join(', ');
-          document.getElementById('new-memory-modal').dataset.editingId = m.id;
-          showNewMemoryModal();
-        }
-      });
-  }
-}
-
-async function deleteMemoryFromDetail() {
-  if (!currentMemoryId) return;
-  if (!confirm('Delete this memory?')) return;
-  try {
-    const res = await fetch('/api/memories/' + currentMemoryId, { method: 'DELETE' });
-    if (res.ok) { showToast('Memory deleted'); closeMemoryDetailModal(); loadDashboard(); loadMemories(); refreshGraph(); }
-    else showToast('Error deleting', 'error');
-  } catch (e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-// ─── Wiki Detail Modal ───
-function showWikiDetailModal(pageId) {
-  const modal = document.getElementById('memory-detail-modal');
-  const content = document.getElementById('memory-detail-content');
-  content.innerHTML = '<div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text w60"></div>';
-  modal.classList.add('open');
-  fetch('/api/wiki/' + pageId)
-    .then(r => r.json())
-    .then(page => {
-      if (page.error || !page.id) { content.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Wiki page not found</div></div>'; return; }
-      const sources = page.sources || [];
-      content.innerHTML = '<div class="detail-section"><span class="cat-badge" style="background:var(--accent);font-size:11px;padding:3px 10px">Wiki Page</span></div><h3 style="margin:12px 0;color:var(--accent);font-size:18px;font-weight:700">' + escapeHtml(page.title) + '</h3><div class="detail-section"><div class="detail-value" style="max-height:300px;overflow-y:auto;white-space:pre-wrap">' + escapeHtml(page.content || 'No content') + '</div></div>' + (sources.length ? '<div class="detail-section"><div class="detail-label">Sources (' + sources.length + ')</div><div style="max-height:150px;overflow-y:auto;margin-top:4px">' + sources.map(s => '<div style="font-size:11px;color:var(--ink-tertiary);font-family:var(--font-mono);background:var(--surface-2);padding:4px 8px;margin:2px 0;border-radius:var(--radius-xs)">' + escapeHtml(s) + '</div>').join('') + '</div></div>' : '') + (page.related && page.related.length ? '<div class="detail-section"><div class="detail-label">Related</div><div class="detail-tags">' + page.related.map(r => '<span>' + escapeHtml(r) + '</span>').join('') + '</div></div>' : '') + '<div class="detail-section" style="padding-top:12px;border-top:1px solid var(--border-faint)"><div class="detail-label">Storage</div><div class="detail-storage">Wiki markdown → wiki/' + page.id + '.md</div></div>';
-      const sourceBtn = document.getElementById('memory-detail-source-btn');
-      if (sourceBtn) sourceBtn.style.display = 'none';
-    })
-    .catch(e => { content.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>'; });
-}
-
-// ─── Document Detail Modal ───
-function showDocumentDetailModal(docTitle, nodeData) {
-  const modal = document.getElementById('memory-detail-modal');
-  const content = document.getElementById('memory-detail-content');
-  content.innerHTML = '<div class="skeleton skeleton-block"></div><div class="skeleton skeleton-text w80"></div>';
-  modal.classList.add('open');
-  const sourcePath = (nodeData && nodeData.source) ? nodeData.source : docTitle;
-  fetch('/api/memories?limit=200')
-    .then(r => r.json())
-    .then(data => {
-      const memories = (data.memories || []).filter(m => m.source && (m.source === sourcePath || m.source.includes(sourcePath) || sourcePath.includes(m.source)));
-      const catColors = {preference:'var(--cat-preference)',fact:'var(--cat-fact)',event:'var(--cat-event)',procedure:'var(--cat-procedure)',concept:'var(--cat-concept)',meta:'var(--cat-meta)',general:'var(--cat-general)'};
-      content.innerHTML = '<div class="detail-section"><span class="cat-badge" style="background:var(--sky);font-size:11px;padding:3px 10px">Document</span></div><h3 style="margin:12px 0;color:var(--sky);font-size:18px;font-weight:700">' + escapeHtml(docTitle) + '</h3><div class="detail-section"><div class="detail-value" style="color:var(--ink-secondary)">Indexed into RAG vector store.' + (memories.length ? ' Found ' + memories.length + ' extracted memories.' : ' No specific memories extracted.') + '</div></div>' + (sourcePath ? '<div class="detail-section"><div class="detail-label">Source Path</div><div class="detail-storage">' + escapeHtml(sourcePath) + '</div></div>' : '') + (memories.length ? '<div class="detail-section"><div class="detail-label">Extracted Memories (' + memories.length + ')</div><div style="max-height:250px;overflow-y:auto;margin-top:4px">' + memories.map(m => '<div style="background:var(--surface-2);border:1px solid var(--border-faint);border-radius:var(--radius-xs);padding:8px;margin:4px 0;font-size:11px"><div style="display:flex;gap:8px;margin-bottom:4px"><span class="cat-badge" style="background:' + (catColors[m.category]||'var(--cat-general)') + '">' + m.category + '</span><span style="color:var(--ink-tertiary)">' + m.importance + '/10</span></div><div style="white-space:pre-wrap;color:var(--ink-primary)">' + escapeHtml(m.fact.slice(0,200)) + (m.fact.length > 200 ? '...' : '') + '</div></div>').join('') + '</div></div>' : '') + '<div class="detail-section" style="padding-top:12px;border-top:1px solid var(--border-faint)"><div class="detail-label">Storage</div><div class="detail-storage">ChromaDB vectors → data/chroma/</div></div>';
-      const sourceBtn = document.getElementById('memory-detail-source-btn');
-      if (sourceBtn) sourceBtn.style.display = 'none';
-    })
-    .catch(e => { content.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>'; });
-}
-
-// ─── New Memory Modal ───
-function showNewMemoryModal() { document.getElementById('new-memory-modal').classList.add('open'); }
-function closeNewMemoryModal() { document.getElementById('new-memory-modal').classList.remove('open'); delete document.getElementById('new-memory-modal').dataset.editingId; }
-async function saveNewMemory() {
-  const fact = document.getElementById('modal-fact').value.trim();
-  if (!fact) { showToast('Please enter a fact', 'error'); return; }
-  const tags = document.getElementById('modal-tags').value.split(',').map(t => t.trim()).filter(Boolean);
-  const editingId = document.getElementById('new-memory-modal').dataset.editingId;
-  const isEditing = !!editingId;
-  try {
-    if (isEditing) {
-      await fetch('/api/memories/' + editingId, { method: 'DELETE' });
-    }
-    await fetch('/api/memories', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ fact, category: document.getElementById('modal-category').value, importance: parseInt(document.getElementById('modal-importance').value) || 5, tags, source: 'web-ui' })
-    });
-    showToast(isEditing ? 'Memory updated!' : 'Memory saved!');
-    closeNewMemoryModal();
-    document.getElementById('modal-fact').value = '';
-    document.getElementById('modal-tags').value = '';
-    loadMemories();
-    loadDashboard();
-    refreshGraph();
-  } catch (e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-// ─── RAG Search ───
 async function doSearch() {
-  const query = document.getElementById('rag-query').value.trim();
-  if (!query) return;
+  const query = $('#rag-query').value.trim();
+  const target = $('#search-results');
+  if (!query) { fill(target, emptyState('⌕', 'Type something to search')); return; }
+  fill(target, skeletons(4));
+
   try {
-    const res = await fetch('/api/search?query=' + encodeURIComponent(query) + '&limit=10');
-    const data = await res.json();
-    const container = document.getElementById('search-results');
-    container.innerHTML = '';
-    if (!data.results || data.results.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="icon">🔍</div><div class="text">No results found</div><div class="hint">Try a different search query</div></div>';
+    const data = await api('/api/search?query=' + encodeURIComponent(query) +
+      '&limit=15&mode=' + encodeURIComponent(searchMode));
+    const results = data.results || [];
+    if (!results.length) { fill(target, emptyState('⌕', 'No results', 'Nothing indexed matches that.')); return; }
+
+    fill(target, results.map(r => {
+      const scoreText = r.hybrid_score !== undefined ? 'rrf ' + r.hybrid_score.toFixed(4)
+        : r.score !== undefined ? 'score ' + Number(r.score).toFixed(3)
+        : r.rank !== undefined ? 'bm25 ' + Number(r.rank).toFixed(2) : '';
+      return el('div', { class: 'result' },
+        el('div', { class: 'result-head' },
+          el('span', { class: 'badge', style: { background: 'var(--ink-3)' } }, r.search_type || 'result'),
+          el('span', { class: 'result-src' }, r.source || 'unknown'),
+          r.heading ? el('span', { class: 'tag' }, r.heading) : null,
+          scoreText ? el('span', { class: 'score' }, scoreText) : null),
+        el('div', { class: 'result-body' }, r.content || ''));
+    }));
+  } catch (err) {
+    fill(target, emptyState('⚠', 'Search failed', err.message));
+  }
+}
+
+/* ── Wiki ──────────────────────────────────────────────────────── */
+
+let wikiPages = [];
+
+async function loadWiki() {
+  const listNode = $('#wiki-list');
+  fill(listNode, skeletons(6, 'sk-line'));
+  const search = $('#wiki-search').value.trim();
+  try {
+    const data = await api('/api/wiki' + (search ? '?search=' + encodeURIComponent(search) : ''));
+    wikiPages = data.pages || [];
+    if (!wikiPages.length) {
+      fill(listNode, emptyState('▤', 'No pages'));
+      fill($('#wiki-doc'), emptyState('▤', 'Nothing compiled yet', 'Press Compile to build pages from your notes and memories.'));
       return;
     }
-    data.results.forEach(r => {
-      const div = document.createElement('div');
-      div.className = 'search-result';
-      div.innerHTML = '<div class="result-source">' + r.source + '</div><div class="result-content">' + r.content + '</div><div class="result-score">relevance: ' + (r.score * 100).toFixed(0) + '%</div>';
-      container.appendChild(div);
-    });
-  } catch (e) {
-    document.getElementById('search-results').innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>';
+    fill(listNode, wikiPages.map(p => el('li', {
+      dataset: { id: p.id }, role: 'option', 'aria-selected': 'false',
+      onclick: () => openWikiPage(p.id),
+    }, p.title)));
+    openWikiPage(wikiPages[0].id);
+  } catch (err) {
+    fill(listNode, emptyState('⚠', 'Could not load wiki', err.message));
   }
 }
 
-// ─── Wiki ───
-let wikiPages = [];
-async function loadWiki() {
-  const search = document.getElementById('wiki-search').value;
+async function openWikiPage(pageId) {
+  $$('#wiki-list li').forEach(li => li.setAttribute('aria-selected', String(li.dataset.id === pageId)));
+  const doc = $('#wiki-doc');
+  fill(doc, skeletons(5, 'sk-line'));
   try {
-    const url = '/api/wiki' + (search ? '?search=' + encodeURIComponent(search) : '');
-    const res = await fetch(url);
-    const data = await res.json();
-    wikiPages = data.pages || [];
-    const list = document.getElementById('wiki-page-list');
-    list.innerHTML = '';
-    if (!wikiPages.length) { list.innerHTML = '<li style="color:var(--ink-tertiary);font-size:11px;border:none;cursor:default">No wiki pages</li>'; return; }
-    wikiPages.forEach(p => {
-      const li = document.createElement('li');
-      li.innerHTML = escapeHtml(p.title) + (p.summary ? '<div class="page-summary">' + escapeHtml(p.summary.slice(0,80)) + '</div>' : '');
-      li.dataset.id = p.id;
-      li.addEventListener('click', () => loadWikiPage(p.id));
-      list.appendChild(li);
-    });
-  } catch (e) {
-    document.getElementById('wiki-page-list').innerHTML = '<li style="color:var(--red);font-size:11px;border:none;cursor:default">Error: ' + e.message + '</li>';
+    const page = await api('/api/wiki/' + encodeURIComponent(pageId));
+    fill(doc,
+      el('div', { class: 'mem-meta', style: { marginBottom: '14px' } },
+        el('span', { class: 'tag' }, 'v' + page.version),
+        el('span', {}, 'compiled ' + relTime(page.last_compiled)),
+        el('span', {}, '· ' + (page.sources || []).length + ' sources')),
+      renderMarkdown(page.content || ''));
+    doc.scrollTop = 0;
+  } catch (err) {
+    fill(doc, emptyState('⚠', 'Could not load page', err.message));
   }
-}
-async function loadWikiPage(pageId) {
-  document.querySelectorAll('.wiki-page-list li').forEach(li => li.classList.remove('active'));
-  const li = document.querySelector('.wiki-page-list li[data-id="' + pageId + '"]');
-  if (li) li.classList.add('active');
-  try {
-    const res = await fetch('/api/wiki/' + pageId);
-    const page = await res.json();
-    const container = document.getElementById('wiki-content');
-    let html = page.content
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\[\[(.+?)\]\]/g, '<a href="#" onclick="loadWikiByTitle(\'$1\');return false;">$1</a>')
-      .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/\n\n/g, '</p><p>')
-      .replace(/\n/g, '<br>');
-    container.innerHTML = '<p>' + html + '</p>';
-  } catch (e) {
-    document.getElementById('wiki-content').innerHTML = '<div class="wiki-empty"><div class="icon">⚠️</div><div class="text">Error: ' + e.message + '</div></div>';
-  }
-}
-async function loadWikiByTitle(title) {
-  const page = wikiPages.find(p => p.title.toLowerCase() === title.toLowerCase());
-  if (page) loadWikiPage(page.id);
 }
 
-// ─── Init ───
-loadDashboard();
+function openWikiByTitle(title) {
+  const match = wikiPages.find(p => p.title.toLowerCase() === String(title).toLowerCase());
+  if (match) { switchView('wiki'); openWikiPage(match.id); }
+  else toast('No wiki page titled "' + title + '"');
+}
+
+/* Markdown → DOM. Builds real nodes, so wiki content (which is derived from
+   indexed files and therefore untrusted) can never become markup. */
+function renderInline(text) {
+  const out = [];
+  const pattern = /(\[\[([^\]]+)\]\])|(\*\*([^*]+)\*\*)|(`([^`]+)`)|(\[([^\]]+)\]\(([^)]+)\))/g;
+  let last = 0, m;
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[2] !== undefined) {
+      const title = m[2];
+      out.push(el('span', { class: 'wiki-link', role: 'link', tabindex: '0',
+        onclick: () => openWikiByTitle(title),
+        onkeydown: e => { if (e.key === 'Enter') openWikiByTitle(title); } }, title));
+    } else if (m[4] !== undefined) out.push(el('strong', {}, m[4]));
+    else if (m[6] !== undefined) out.push(el('code', {}, m[6]));
+    else if (m[8] !== undefined) {
+      const href = m[9];
+      // Only http(s) links become anchors; javascript: and data: stay as text.
+      out.push(/^https?:\/\//i.test(href)
+        ? el('a', { href: href, target: '_blank', rel: 'noopener noreferrer' }, m[8])
+        : el('span', {}, m[8]));
+    }
+    last = pattern.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function renderMarkdown(source) {
+  const frag = document.createDocumentFragment();
+  let list = null;
+  for (const raw of String(source).split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+    const quote = /^\s*>\s?(.*)$/.exec(line);
+
+    if (!bullet && list) { frag.append(list); list = null; }
+    if (heading) {
+      const level = Math.min(heading[1].length, 3);
+      frag.append(el('h' + level, {}, renderInline(heading[2])));
+    } else if (bullet) {
+      if (!list) list = el('ul');
+      list.append(el('li', {}, renderInline(bullet[1])));
+    } else if (quote) {
+      frag.append(el('blockquote', {}, renderInline(quote[1])));
+    } else if (line.trim()) {
+      frag.append(el('p', {}, renderInline(line)));
+    }
+  }
+  if (list) frag.append(list);
+  return frag;
+}
+
+/* ── Episodes ──────────────────────────────────────────────────── */
+
+async function loadEpisodes() {
+  const listNode = $('#episode-list');
+  fill(listNode, skeletons(6, 'sk-line'));
+  const params = new URLSearchParams({ limit: '100' });
+  const session = $('#episode-session').value;
+  const topic = $('#episode-topic').value.trim();
+  if (session) params.set('session_id', session);
+  if (topic) params.set('topic', topic);
+
+  try {
+    const [episodes, sessions] = await Promise.all([
+      api('/api/episodes?' + params),
+      api('/api/sessions?limit=50'),
+    ]);
+
+    const select = $('#episode-session');
+    const current = select.value;
+    fill(select, el('option', { value: '' }, 'All sessions'),
+      ...(sessions.sessions || []).map(s => el('option', { value: s.session_id },
+        s.session_id.slice(0, 12) + '… (' + s.episodes + ')')));
+    select.value = current;
+
+    const list = episodes.episodes || [];
+    fill(listNode, list.length
+      ? list.map(e => el('li', { onclick: () => showEpisodeDetail(e) },
+          el('span', { class: 'badge', style: { background: e.role === 'user' ? 'var(--sky)' : 'var(--accent)' } }, e.role),
+          el('span', { class: 'li-text' }, e.summary || ''),
+          el('span', { class: 'li-side' }, relTime(e.timestamp))))
+      : emptyState('◷', 'No episodes', 'Episodes appear once an agent logs conversation turns.'));
+  } catch (err) {
+    fill(listNode, emptyState('⚠', 'Could not load episodes', err.message));
+  }
+}
+
+function showEpisodeDetail(episode) {
+  openDetail('Episode', [
+    detailRow('Session', episode.session_id, true),
+    detailRow('Role', episode.role),
+    detailRow('Summary', episode.summary || '—'),
+    detailRow('Topics', (episode.topics || []).join(', ') || '—'),
+    detailRow('Outcome', episode.outcome || '—'),
+    detailRow('Logged', episode.timestamp || '—', true),
+  ], []);
+}
+
+/* ── Detail modal ──────────────────────────────────────────────── */
+
+function detailRow(label, value, mono) {
+  return el('div', { class: 'detail-row' },
+    el('div', { class: 'detail-label' }, label),
+    el('div', { class: 'detail-value' + (mono ? ' mono' : '') }, value));
+}
+
+function openDetail(title, rows, actions) {
+  $('#detail-title').textContent = title;
+  fill($('#detail-body'), rows);
+  fill($('#detail-actions'), actions || []);
+  openModal('detail-backdrop');
+}
+
+async function showMemoryDetail(memoryId) {
+  try {
+    const m = await api('/api/memories/' + encodeURIComponent(memoryId));
+    openDetail('Memory', [
+      el('div', { class: 'mem-meta', style: { marginBottom: '10px' } },
+        categoryBadge(m.category), importanceBar(m.importance),
+        el('span', {}, 'confidence ' + (m.confidence ?? 1).toFixed(2))),
+      detailRow('Fact', m.fact),
+      m.context ? detailRow('Context', m.context) : null,
+      detailRow('Tags', (m.tags || []).join(', ') || '—'),
+      detailRow('Source', m.source || '—'),
+      detailRow('Stored', m.timestamp || '—', true),
+      detailRow('Last recalled', (m.last_accessed || '—') + '  ·  ' + (m.access_count || 0) + ' times', true),
+      m.wiki_path ? detailRow('Wiki mirror', m.wiki_path, true) : null,
+      detailRow('ID', m.id, true),
+    ].filter(Boolean), [
+      el('button', { class: 'btn btn-danger btn-sm', onclick: () => deleteMemory(m.id) }, 'Delete'),
+      el('button', { class: 'btn btn-primary btn-sm', onclick: () => openEditor(m) }, 'Edit'),
+    ]);
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+}
+
+async function deleteMemory(memoryId) {
+  if (!confirm('Delete this memory? Its wiki mirror and vectors go too.')) return;
+  try {
+    await api('/api/memories/' + encodeURIComponent(memoryId), { method: 'DELETE' });
+    toast('Memory deleted', 'ok');
+    closeModal('detail-backdrop');
+    refreshCurrentView();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+/* ── Editor ────────────────────────────────────────────────────── */
+
+let editingId = null;
+
+function openEditor(memory) {
+  editingId = memory ? memory.id : null;
+  $('#editor-title').textContent = memory ? 'Edit memory' : 'New memory';
+  $('#ed-fact').value = memory ? memory.fact : '';
+  $('#ed-category').value = memory ? memory.category : 'general';
+  $('#ed-importance').value = memory ? memory.importance : 5;
+  $('#ed-importance-out').textContent = memory ? memory.importance : 5;
+  $('#ed-tags').value = memory ? (memory.tags || []).join(', ') : '';
+  $('#ed-context').value = memory && memory.context ? memory.context : '';
+  closeModal('detail-backdrop');
+  openModal('editor-backdrop');
+  setTimeout(() => $('#ed-fact').focus(), 40);
+}
+
+async function saveMemory() {
+  const fact = $('#ed-fact').value.trim();
+  if (!fact) { toast('A memory needs some text', 'err'); return; }
+
+  const payload = {
+    fact: fact,
+    category: $('#ed-category').value,
+    importance: Number($('#ed-importance').value),
+    tags: $('#ed-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+    context: $('#ed-context').value.trim() || null,
+  };
+
+  const button = $('#ed-save');
+  button.disabled = true;
+  try {
+    if (editingId) {
+      // PATCH, not delete-and-recreate: the 0.1 UI's "edit" minted a new ID
+      // and reset the access history every time you fixed a typo.
+      await api('/api/memories/' + encodeURIComponent(editingId), { method: 'PATCH', body: payload });
+      toast('Memory updated', 'ok');
+    } else {
+      await api('/api/memories', { method: 'POST', body: payload });
+      toast('Memory stored', 'ok');
+    }
+    closeModal('editor-backdrop');
+    refreshCurrentView();
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+/* ── Maintenance ───────────────────────────────────────────────── */
+
+const MAINTENANCE = [
+  { title: 'Consolidate', detail: 'Extract durable facts from recent conversation logs, then reflect over them.',
+    label: 'Run consolidation', path: '/api/consolidate', confirm: 'Consolidation writes new memories. Continue?' },
+  { title: 'Prune (preview)', detail: 'Report what pruning would remove without deleting anything.',
+    label: 'Dry run', path: '/api/prune', body: { dry_run: true } },
+  { title: 'Prune', detail: 'Decay confidence, drop expired, merge duplicates, remove stale low-importance memories.',
+    label: 'Prune for real', path: '/api/prune', body: { dry_run: false },
+    confirm: 'This permanently deletes memories. Continue?', danger: true },
+  { title: 'Index notes', detail: 'Scan the notes directory and embed anything new or changed.',
+    label: 'Index notes', path: '/api/index-notes' },
+  { title: 'Index wiki', detail: 'Embed the wiki directory. Compiled pages are tagged so they cannot cite themselves.',
+    label: 'Index wiki', path: '/api/index-wiki' },
+  { title: 'Rebuild memory index', detail: 'Rebuild the keyword index used by recall. Run once after upgrading from 0.1.',
+    label: 'Reindex', path: '/api/reindex-memories' },
+];
+
+function renderMaintenance() {
+  fill($('#maintenance-grid'), MAINTENANCE.map(action => {
+    const button = el('button', { class: 'btn ' + (action.danger ? 'btn-danger' : 'btn-primary') + ' btn-sm' }, action.label);
+    button.addEventListener('click', async () => {
+      if (action.confirm && !confirm(action.confirm)) return;
+      const original = button.textContent;
+      fill(button, el('span', { class: 'spinner' }), ' Working…');
+      button.disabled = true;
+      try {
+        const result = await api(action.path, { method: 'POST', body: action.body || {} });
+        $('#maintenance-output').textContent = JSON.stringify(result, null, 2);
+        toast(action.title + ' finished', 'ok');
+        loadDashboard();
+      } catch (err) {
+        $('#maintenance-output').textContent = 'Error: ' + err.message;
+        toast(err.message, 'err');
+      } finally {
+        fill(button, original);
+        button.disabled = false;
+      }
+    });
+    return el('div', { class: 'panel' },
+      el('div', { class: 'panel-head' }, el('h2', {}, action.title)),
+      el('div', { class: 'panel-body' },
+        el('p', { style: { margin: '0 0 14px', color: 'var(--ink-2)', fontSize: '13px' } }, action.detail),
+        button));
+  }));
+}
+
+/* ── Knowledge graph ───────────────────────────────────────────────
+   A small force-directed layout on canvas. This replaces a 490KB
+   vis-network bundle loaded from a CDN, whose string `title` fields were
+   rendered as HTML — i.e. every memory's text was an XSS vector.
+   Layout runs with cooling and then freezes, so an idle tab costs nothing. */
+
+const graph = {
+  nodes: [], edges: [], visible: new Set(['memory', 'wiki', 'document']),
+  scale: 1, offsetX: 0, offsetY: 0,
+  alpha: 0, running: false, hover: null, dragging: null, panning: null,
+  canvas: null, ctx: null, dpr: 1, loaded: false,
+};
+
+function graphResize() {
+  const canvas = graph.canvas;
+  const rect = canvas.getBoundingClientRect();
+  graph.dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(rect.width * graph.dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * graph.dpr));
+  graph.width = rect.width;
+  graph.height = rect.height;
+  graphDraw();
+}
+
+async function loadGraph() {
+  if (!graph.canvas) return;
+  $('#graph-hud').textContent = 'loading…';
+  try {
+    const data = await api('/api/graph?limit=250');
+    const cx = graph.width / 2, cy = graph.height / 2;
+    graph.nodes = (data.nodes || []).map((n, i) => {
+      const angle = i * 2.399963, radius = 14 * Math.sqrt(i);
+      return Object.assign({}, n, {
+        x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle),
+        vx: 0, vy: 0, r: 4 + Math.sqrt(n.weight || 4) * 1.8,
+      });
+    });
+    const byId = new Map(graph.nodes.map(n => [n.id, n]));
+    graph.edges = (data.edges || []).map(e => ({ source: byId.get(e.from), target: byId.get(e.to), kind: e.kind }))
+      .filter(e => e.source && e.target);
+    graph.loaded = true;
+    const c = data.counts || {};
+    $('#graph-hud').textContent = c.memories + ' memories · ' + c.wiki + ' wiki · ' +
+      c.documents + ' docs · ' + graph.edges.length + ' links';
+    graphReheat();
+  } catch (err) {
+    $('#graph-hud').textContent = 'error';
+    toast('Graph: ' + err.message, 'err');
+  }
+}
+
+function graphNodesVisible() { return graph.nodes.filter(n => graph.visible.has(n.group)); }
+
+function graphReheat() { graph.alpha = 1; if (!graph.running) { graph.running = true; requestAnimationFrame(graphTick); } }
+
+function graphTick() {
+  const nodes = graphNodesVisible();
+  const cx = graph.width / 2, cy = graph.height / 2;
+  const alpha = graph.alpha;
+
+  // Repulsion. O(n²) but n is capped server-side at 600, which is ~180k
+  // cheap iterations — well inside a frame budget, and it stops entirely
+  // once the layout cools.
+  for (let i = 0; i < nodes.length; i++) {
+    const a = nodes[i];
+    for (let j = i + 1; j < nodes.length; j++) {
+      const b = nodes[j];
+      let dx = a.x - b.x, dy = a.y - b.y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 === 0) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25; }
+      if (d2 > 90000) continue;
+      const force = (1400 * alpha) / d2;
+      const d = Math.sqrt(d2);
+      a.vx += (dx / d) * force; a.vy += (dy / d) * force;
+      b.vx -= (dx / d) * force; b.vy -= (dy / d) * force;
+    }
+  }
+
+  for (const e of graph.edges) {
+    if (!graph.visible.has(e.source.group) || !graph.visible.has(e.target.group)) continue;
+    const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const force = (d - 90) * 0.012 * alpha;
+    const fx = (dx / d) * force, fy = (dy / d) * force;
+    e.source.vx += fx; e.source.vy += fy;
+    e.target.vx -= fx; e.target.vy -= fy;
+  }
+
+  for (const n of nodes) {
+    if (n === graph.dragging) { n.vx = n.vy = 0; continue; }
+    n.vx += (cx - n.x) * 0.0016 * alpha;
+    n.vy += (cy - n.y) * 0.0016 * alpha;
+    n.vx *= 0.82; n.vy *= 0.82;
+    n.x += n.vx; n.y += n.vy;
+  }
+
+  graph.alpha *= 0.975;
+  graphDraw();
+  if (graph.alpha > 0.005) requestAnimationFrame(graphTick);
+  else graph.running = false;
+}
+
+function graphDraw() {
+  const ctx = graph.ctx;
+  if (!ctx) return;
+  const css = getComputedStyle(document.documentElement);
+  ctx.save();
+  ctx.setTransform(graph.dpr, 0, 0, graph.dpr, 0, 0);
+  ctx.clearRect(0, 0, graph.width, graph.height);
+  ctx.translate(graph.offsetX, graph.offsetY);
+  ctx.scale(graph.scale, graph.scale);
+
+  ctx.lineWidth = 1 / graph.scale;
+  ctx.strokeStyle = css.getPropertyValue('--border').trim() || '#ddd';
+  ctx.globalAlpha = 0.75;
+  ctx.beginPath();
+  for (const e of graph.edges) {
+    if (!graph.visible.has(e.source.group) || !graph.visible.has(e.target.group)) continue;
+    ctx.moveTo(e.source.x, e.source.y);
+    ctx.lineTo(e.target.x, e.target.y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  const inkColor = css.getPropertyValue('--ink-2').trim() || '#555';
+  const surface = css.getPropertyValue('--surface').trim() || '#fff';
+  const showLabels = graph.scale > 0.85;
+  ctx.font = (11 / graph.scale).toFixed(2) + 'px ' + (css.getPropertyValue('--font') || 'sans-serif');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+
+  for (const n of graphNodesVisible()) {
+    ctx.beginPath();
+    if (n.group === 'memory') {
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    } else {
+      const s = n.r * 1.6;
+      ctx.rect(n.x - s / 2, n.y - s / 2, s, s);
+    }
+    ctx.fillStyle = n.color || '#94a3b8';
+    ctx.fill();
+    if (n === graph.hover) {
+      ctx.lineWidth = 2.5 / graph.scale;
+      ctx.strokeStyle = css.getPropertyValue('--ink').trim() || '#000';
+      ctx.stroke();
+    } else {
+      ctx.lineWidth = 1.5 / graph.scale;
+      ctx.strokeStyle = surface;
+      ctx.stroke();
+    }
+    if (showLabels) {
+      ctx.fillStyle = inkColor;
+      ctx.fillText(n.label.length > 26 ? n.label.slice(0, 26) + '…' : n.label, n.x, n.y + n.r + 3 / graph.scale);
+    }
+  }
+  ctx.restore();
+}
+
+function graphPointAt(event) {
+  const rect = graph.canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left - graph.offsetX) / graph.scale,
+    y: (event.clientY - rect.top - graph.offsetY) / graph.scale,
+    clientX: event.clientX - rect.left, clientY: event.clientY - rect.top,
+  };
+}
+
+function graphNodeAt(point) {
+  const nodes = graphNodesVisible();
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    if (Math.hypot(n.x - point.x, n.y - point.y) <= n.r + 4) return n;
+  }
+  return null;
+}
+
+function graphFit() {
+  const nodes = graphNodesVisible();
+  if (!nodes.length) return;
+  const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 60;
+  const scale = Math.min(
+    graph.width / Math.max(1, maxX - minX + pad * 2),
+    graph.height / Math.max(1, maxY - minY + pad * 2), 2.5);
+  graph.scale = Math.max(0.12, scale);
+  graph.offsetX = graph.width / 2 - ((minX + maxX) / 2) * graph.scale;
+  graph.offsetY = graph.height / 2 - ((minY + maxY) / 2) * graph.scale;
+  graphDraw();
+}
+
+function showGraphNodeDetail(node) {
+  if (node.group === 'memory') { showMemoryDetail(node.meta.id); return; }
+  if (node.group === 'wiki') { switchView('wiki'); openWikiPage(node.meta.id); return; }
+  openDetail('Document', [
+    detailRow('Path', node.meta.path, true),
+    detailRow('Chunks', String(node.meta.chunks)),
+    detailRow('Origin', node.meta.origin || 'note'),
+  ], []);
+}
+
+function initGraphCanvas() {
+  const canvas = $('#graph-canvas');
+  graph.canvas = canvas;
+  graph.ctx = canvas.getContext('2d');
+  const tip = $('#graph-tip');
+
+  new ResizeObserver(() => graphResize()).observe($('#graph-wrap'));
+
+  canvas.addEventListener('mousedown', event => {
+    const point = graphPointAt(event);
+    const node = graphNodeAt(point);
+    if (node) { graph.dragging = node; }
+    else { graph.panning = { x: event.clientX - graph.offsetX, y: event.clientY - graph.offsetY }; }
+    canvas.classList.add('dragging');
+  });
+
+  window.addEventListener('mousemove', event => {
+    if (graph.dragging) {
+      const point = graphPointAt(event);
+      graph.dragging.x = point.x; graph.dragging.y = point.y;
+      graphReheat();
+      return;
+    }
+    if (graph.panning) {
+      graph.offsetX = event.clientX - graph.panning.x;
+      graph.offsetY = event.clientY - graph.panning.y;
+      graphDraw();
+      return;
+    }
+    if (!graph.canvas || !document.getElementById('view-graph').classList.contains('active')) return;
+    const rect = canvas.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right ||
+        event.clientY < rect.top || event.clientY > rect.bottom) {
+      if (graph.hover) { graph.hover = null; tip.style.display = 'none'; graphDraw(); }
+      return;
+    }
+    const point = graphPointAt(event);
+    const node = graphNodeAt(point);
+    if (node !== graph.hover) {
+      graph.hover = node;
+      if (node) {
+        // textContent, never innerHTML — node tooltips contain raw memory text.
+        fill(tip, el('div', { class: 'tip-kind' }, node.group), el('div', {}, node.tooltip || node.label));
+        tip.style.display = 'block';
+        tip.style.left = Math.min(point.clientX + 14, graph.width - 330) + 'px';
+        tip.style.top = (point.clientY + 14) + 'px';
+      } else {
+        tip.style.display = 'none';
+      }
+      graphDraw();
+    } else if (node) {
+      tip.style.left = Math.min(point.clientX + 14, graph.width - 330) + 'px';
+      tip.style.top = (point.clientY + 14) + 'px';
+    }
+  });
+
+  window.addEventListener('mouseup', event => {
+    if (graph.dragging) {
+      const point = graphPointAt(event);
+      if (Math.hypot(point.x - graph.dragging.x, point.y - graph.dragging.y) < 3) showGraphNodeDetail(graph.dragging);
+    }
+    graph.dragging = null; graph.panning = null;
+    canvas.classList.remove('dragging');
+  });
+
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const next = Math.min(3, Math.max(0.1, graph.scale * factor));
+    graph.offsetX = mx - (mx - graph.offsetX) * (next / graph.scale);
+    graph.offsetY = my - (my - graph.offsetY) * (next / graph.scale);
+    graph.scale = next;
+    graphDraw();
+  }, { passive: false });
+
+  graphResize();
+}
+
+/* ── Modals ────────────────────────────────────────────────────── */
+
+function openModal(id) { $('#' + id).classList.add('open'); }
+function closeModal(id) { $('#' + id).classList.remove('open'); }
+
+/* ── Command palette ───────────────────────────────────────────── */
+
+const COMMANDS = [
+  { label: 'Go to Dashboard', hint: 'view', run: () => switchView('dashboard') },
+  { label: 'Go to Memories', hint: 'view', run: () => switchView('memories') },
+  { label: 'Go to Search', hint: 'view', run: () => switchView('search') },
+  { label: 'Go to Graph', hint: 'view', run: () => switchView('graph') },
+  { label: 'Go to Wiki', hint: 'view', run: () => switchView('wiki') },
+  { label: 'Go to Episodes', hint: 'view', run: () => switchView('episodes') },
+  { label: 'Go to Maintenance', hint: 'view', run: () => switchView('maintenance') },
+  { label: 'New memory', hint: 'action', run: () => openEditor(null) },
+  { label: 'Compile wiki', hint: 'action', run: () => compileWiki() },
+  { label: 'Refresh current view', hint: 'action', run: () => refreshCurrentView() },
+  { label: 'Toggle theme', hint: 'action', run: () => cycleTheme() },
+  { label: 'Set API token', hint: 'action', run: () => setApiToken() },
+];
+
+let paletteIndex = 0, paletteMatches = COMMANDS;
+
+function openPalette() {
+  $('#palette-input').value = '';
+  renderPalette('');
+  openModal('palette-backdrop');
+  setTimeout(() => $('#palette-input').focus(), 40);
+}
+
+function renderPalette(query) {
+  const needle = query.toLowerCase().trim();
+  paletteMatches = COMMANDS.filter(c => !needle || c.label.toLowerCase().includes(needle));
+  paletteIndex = 0;
+  fill($('#palette-results'), paletteMatches.length
+    ? paletteMatches.map((c, i) => el('li', {
+        role: 'option', 'aria-selected': String(i === paletteIndex),
+        onclick: () => runPaletteItem(i),
+      }, c.label, el('span', { class: 'pal-hint' }, c.hint)))
+    : el('li', { 'aria-selected': 'false' }, 'No matching command'));
+}
+
+function movePalette(delta) {
+  if (!paletteMatches.length) return;
+  paletteIndex = (paletteIndex + delta + paletteMatches.length) % paletteMatches.length;
+  const items = $$('#palette-results li');
+  items.forEach((li, i) => li.setAttribute('aria-selected', String(i === paletteIndex)));
+  if (items[paletteIndex]) items[paletteIndex].scrollIntoView({ block: 'nearest' });
+}
+
+function runPaletteItem(index) {
+  const command = paletteMatches[index];
+  closeModal('palette-backdrop');
+  if (command) command.run();
+}
+
+function setApiToken() {
+  const current = localStorage.getItem(TOKEN_KEY) || '';
+  const next = prompt('X-Amnis-Token for mutating requests (leave blank to clear):', current);
+  if (next === null) return;
+  if (next.trim()) { localStorage.setItem(TOKEN_KEY, next.trim()); toast('Token saved', 'ok'); }
+  else { localStorage.removeItem(TOKEN_KEY); toast('Token cleared'); }
+}
+
+/* ── Theme ─────────────────────────────────────────────────────── */
+
+const THEMES = ['system', 'light', 'dark'];
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('amnis.theme', theme);
+  $('#theme-toggle').textContent = theme === 'light' ? '☀' : theme === 'dark' ? '☾' : '◐';
+  $('#theme-toggle').title = 'Theme: ' + theme;
+  if (graph.loaded) graphDraw();
+}
+
+function cycleTheme() {
+  const current = localStorage.getItem('amnis.theme') || 'system';
+  applyTheme(THEMES[(THEMES.indexOf(current) + 1) % THEMES.length]);
+}
+
+/* ── Views ─────────────────────────────────────────────────────── */
+
+const VIEWS = {
+  dashboard:   { title: 'Dashboard',   sub: 'Overview of every layer',            load: loadDashboard },
+  memories:    { title: 'Memories',    sub: 'Everything Amnis remembers',         load: loadMemories },
+  search:      { title: 'Search',      sub: 'Semantic and keyword search',        load: () => {} },
+  graph:       { title: 'Graph',       sub: 'How memories, pages and docs relate', load: () => { if (!graph.loaded) loadGraph(); else graphDraw(); } },
+  wiki:        { title: 'Wiki',        sub: 'Compiled knowledge pages',           load: loadWiki },
+  episodes:    { title: 'Episodes',    sub: 'Logged conversation turns',          load: loadEpisodes },
+  maintenance: { title: 'Maintenance', sub: 'Consolidation, pruning, indexing',   load: renderMaintenance },
+};
+
+let currentView = 'dashboard';
+
+function switchView(name) {
+  if (!VIEWS[name]) return;
+  currentView = name;
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  $$('.nav-btn').forEach(b => {
+    if (b.dataset.view === name) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  $('#view-title').textContent = VIEWS[name].title;
+  $('#view-sub').textContent = VIEWS[name].sub;
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  if (name === 'graph') requestAnimationFrame(() => { graphResize(); VIEWS[name].load(); });
+  else VIEWS[name].load();
+}
+
+function refreshCurrentView() {
+  if (currentView === 'graph') loadGraph();
+  else VIEWS[currentView].load();
+  if (currentView !== 'dashboard') loadDashboard();
+}
+
+async function compileWiki() {
+  toast('Compiling wiki — this can take a while…');
+  try {
+    const result = await api('/api/compile-wiki', { method: 'POST', body: {} });
+    toast('Compiled ' + result.compiled + ' pages', 'ok');
+    if (currentView === 'wiki') loadWiki();
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+/* ── Wiring ────────────────────────────────────────────────────── */
+
+function init() {
+  applyTheme(localStorage.getItem('amnis.theme') || 'system');
+
+  for (const cat of CATEGORIES) {
+    $('#mem-category').append(el('option', { value: cat }, cat));
+    $('#ed-category').append(el('option', { value: cat }, cat));
+  }
+
+  $$('.nav-btn').forEach(b => b.addEventListener('click', () => switchView(b.dataset.view)));
+  $('#theme-toggle').addEventListener('click', cycleTheme);
+  $('#new-memory-btn').addEventListener('click', () => openEditor(null));
+  $('#open-palette').addEventListener('click', openPalette);
+
+  $('#mem-search-btn').addEventListener('click', loadMemories);
+  $('#mem-search').addEventListener('keydown', e => { if (e.key === 'Enter') loadMemories(); });
+  $('#mem-category').addEventListener('change', loadMemories);
+  $('#mem-importance').addEventListener('change', loadMemories);
+  $('#mem-clear-btn').addEventListener('click', () => {
+    $('#mem-search').value = ''; $('#mem-category').value = ''; $('#mem-importance').value = '0';
+    loadMemories();
+  });
+
+  $('#rag-search-btn').addEventListener('click', doSearch);
+  $('#rag-query').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+  $$('#search-mode button').forEach(b => b.addEventListener('click', () => {
+    searchMode = b.dataset.mode;
+    $$('#search-mode button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    if ($('#rag-query').value.trim()) doSearch();
+  }));
+
+  $$('#graph-filter button').forEach(b => b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    if (on) graph.visible.add(b.dataset.group); else graph.visible.delete(b.dataset.group);
+    graphReheat();
+  }));
+  $('#graph-fit').addEventListener('click', graphFit);
+  $('#graph-reheat').addEventListener('click', graphReheat);
+  $('#graph-refresh').addEventListener('click', loadGraph);
+
+  $('#wiki-search').addEventListener('keydown', e => { if (e.key === 'Enter') loadWiki(); });
+  $('#wiki-compile-btn').addEventListener('click', compileWiki);
+  $('#wiki-lint-btn').addEventListener('click', async () => {
+    try {
+      const result = await api('/api/wiki-lint');
+      openDetail('Wiki lint', [
+        detailRow('Pages checked', String(result.pages_checked)),
+        detailRow('Issues found', String(result.issues_found)),
+        ...(result.issues || []).slice(0, 40).map(i => detailRow(i.page, i.issue + ' — ' + i.detail)),
+      ], []);
+    } catch (err) { toast(err.message, 'err'); }
+  });
+
+  $('#episode-refresh').addEventListener('click', loadEpisodes);
+  $('#episode-session').addEventListener('change', loadEpisodes);
+  $('#episode-topic').addEventListener('keydown', e => { if (e.key === 'Enter') loadEpisodes(); });
+
+  $('#ed-save').addEventListener('click', saveMemory);
+  $('#ed-importance').addEventListener('input', e => { $('#ed-importance-out').textContent = e.target.value; });
+
+  $$('[data-close]').forEach(b => b.addEventListener('click', () => closeModal(b.dataset.close)));
+  $$('.modal-backdrop').forEach(backdrop => backdrop.addEventListener('mousedown', e => {
+    if (e.target === backdrop) backdrop.classList.remove('open');
+  }));
+
+  const paletteInput = $('#palette-input');
+  paletteInput.addEventListener('input', e => renderPalette(e.target.value));
+  paletteInput.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); movePalette(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); movePalette(-1); }
+    else if (e.key === 'Enter') { e.preventDefault(); runPaletteItem(paletteIndex); }
+  });
+
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); return; }
+    if (e.key === 'Escape') { $$('.modal-backdrop.open').forEach(m => m.classList.remove('open')); return; }
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'n') { e.preventDefault(); openEditor(null); }
+    else if (e.key === 'r') { e.preventDefault(); refreshCurrentView(); }
+    else if (e.key === '/') { e.preventDefault(); switchView('search'); $('#rag-query').focus(); }
+    else if (e.key >= '1' && e.key <= '7') switchView(Object.keys(VIEWS)[Number(e.key) - 1]);
+  });
+
+  window.addEventListener('hashchange', () => switchView((location.hash || '#dashboard').slice(1)));
+
+  initGraphCanvas();
+  switchView((location.hash || '#dashboard').slice(1) in VIEWS ? (location.hash || '#dashboard').slice(1) : 'dashboard');
+  loadDashboard();
+}
+
+document.addEventListener('DOMContentLoaded', init);
 </script>
 </body>
 </html>

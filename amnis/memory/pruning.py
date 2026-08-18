@@ -1,54 +1,42 @@
-"""Memory Pruning — automated cleanup of stale, low-importance, and duplicate facts.
+"""Automated cleanup of stale, low-importance, and duplicate facts.
 
-Based on the Memory AI + RAG deep research:
-  - Mem0 and Letta both implement forgetting mechanisms
-  - Stale memories dilute retrieval quality
-  - Contradictory memories reduce confidence
-  - Automatic pruning prevents memory bloat without manual intervention
+Conservative by design: manual entries are never auto-deleted, and everything
+supports ``dry_run``.
 
-This module is intentionally conservative — it flags/deletes only clearly
-stale or low-value memories. High-importance memories are never auto-pruned.
+Fixes over 0.1: the age arithmetic here used to mix a naive "now" with aware
+column values (``TypeError`` on every run); merged duplicates lost tags when
+either side was ``None``; and deletions left the mirrored wiki file and its
+ChromaDB chunks behind, so "deleted" memories kept coming back in search.
 """
-import uuid
-from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, func
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
 
 from ..config import config
-from ..database import get_session, MemoryFact
+from ..database import MemoryFact, session_scope
+from .store import _purge_memory_artifacts
 
 
 def prune_low_importance(
-    threshold: int = None,
-    unaccessed_days: int = None,
+    threshold: int | None = None,
+    unaccessed_days: int | None = None,
     dry_run: bool = False,
 ) -> dict:
-    """Delete memories below importance threshold that haven't been accessed recently.
+    """Delete low-importance memories that nothing has touched in a while."""
+    threshold = config.prune_low_importance if threshold is None else threshold
+    unaccessed_days = config.prune_unaccessed_days if unaccessed_days is None else unaccessed_days
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=unaccessed_days)
 
-    Args:
-        threshold: Importance below which memories are candidates (default: config.prune_low_importance)
-        unaccessed_days: Days since last access for a memory to be considered stale
-        dry_run: If True, only report what would be deleted without actually deleting
-
-    Returns:
-        Summary of pruning operation
-    """
-    if threshold is None:
-        threshold = config.prune_low_importance
-    if unaccessed_days is None:
-        unaccessed_days = config.prune_unaccessed_days
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=unaccessed_days)
-
-    session = get_session()
-    try:
-        # Find candidates: low importance + unaccessed for a while + not manual source
+    doomed: list[tuple[str, str | None]] = []
+    with session_scope() as session:
         candidates = (
             session.query(MemoryFact)
             .filter(
                 MemoryFact.importance < threshold,
                 MemoryFact.last_accessed < cutoff,
-                MemoryFact.source != "manual",  # Never auto-delete manual entries
+                MemoryFact.source != "manual",
             )
             .order_by(MemoryFact.importance, MemoryFact.last_accessed)
             .limit(config.prune_batch_size)
@@ -60,215 +48,148 @@ def prune_low_importance(
                 "pruned": 0,
                 "candidates": 0,
                 "dry_run": dry_run,
+                "aged_memories": [],
+                "importance_threshold": threshold,
+                "unaccessed_days": unaccessed_days,
                 "message": "No low-importance stale memories found.",
             }
 
-        # Group by age for reporting
-        total = len(candidates)
-        ages = []
-        for c in candidates:
-            days_since = (datetime.now(timezone.utc) - c.last_accessed).days
-            ages.append({
+        ages = [
+            {
                 "id": c.id,
                 "fact": c.fact[:80],
                 "importance": c.importance,
                 "source": c.source,
-                "days_unaccessed": days_since,
-            })
+                "days_unaccessed": (now - c.last_accessed).days,
+            }
+            for c in candidates
+        ]
+        total = len(candidates)
 
         if not dry_run:
-            # Also remove from RAG if indexed
+            doomed = [(c.id, c.wiki_path) for c in candidates]
             for c in candidates:
-                _remove_from_rag_if_exists(c.fact[:100])
+                session.delete(c)
 
-            # Delete from memory store
-            ids = [c.id for c in candidates]
-            (
-                session.query(MemoryFact)
-                .filter(MemoryFact.id.in_(ids))
-                .delete(synchronize_session=False)
-            )
-            session.commit()
+    for memory_id, wiki_path in doomed:
+        _purge_memory_artifacts(memory_id, wiki_path)
 
-        return {
-            "pruned": total if not dry_run else 0,
-            "dry_run": dry_run,
-            "candidates": total,
-            "aged_memories": ages[:5],  # Sample for reporting
-            "importance_threshold": threshold,
-            "unaccessed_days": unaccessed_days,
-        }
-    finally:
-        session.close()
+    return {
+        "pruned": total if not dry_run else 0,
+        "dry_run": dry_run,
+        "candidates": total,
+        "aged_memories": ages[:5],
+        "importance_threshold": threshold,
+        "unaccessed_days": unaccessed_days,
+    }
 
 
 def prune_expired() -> int:
-    """Remove all expired memories (those past their expiry date).
+    """Remove memories past their expiry date, artifacts included."""
+    from .store import clear_expired
 
-    Returns:
-        Number of memories deleted
-    """
-    session = get_session()
-    try:
-        count = (
-            session.query(MemoryFact)
-            .filter(MemoryFact.expiry < datetime.now(timezone.utc))
-            .delete()
-        )
-        session.commit()
-        return count
-    finally:
-        session.close()
+    return clear_expired()
 
 
-def merge_duplicates(
-    similarity_check: bool = False,
-    dry_run: bool = False,
-) -> dict:
-    """Merge near-duplicate memories (same text, slightly different wording).
+def merge_duplicates(similarity_check: bool = False, dry_run: bool = False) -> dict:
+    """Merge memories whose first 50 characters match, keeping the best one."""
+    doomed: list[tuple[str, str | None]] = []
+    merged_details: list[dict] = []
+    merged = 0
 
-    Phase 1: Exact/close text duplicates (always runs)
-    Phase 2: Semantic duplicates (only if similarity_check=True, uses sentence embeddings)
+    with session_scope() as session:
+        all_memories = session.query(MemoryFact).order_by(MemoryFact.timestamp).all()
 
-    Args:
-        similarity_check: If True, also check semantic similarity (uses sentence-transformers)
-        dry_run: If True, only report without modifying
-
-    Returns:
-        Summary of merge operation
-    """
-    session = get_session()
-    try:
-        # Phase 1: Find memories with very similar text (first 80 chars match)
-        all_memories = (
-            session.query(MemoryFact)
-            .order_by(MemoryFact.timestamp)
-            .all()
-        )
-
-        merged = 0
-        merged_details = []
-
-        # Group by first 50 chars (case-insensitive)
-        groups = {}
+        groups: dict[str, list[MemoryFact]] = {}
         for m in all_memories:
-            key = m.fact[:50].lower().strip()
-            if key not in groups:
-                groups[key] = []
-            groups[key].append(m)
+            groups.setdefault(m.fact[:50].lower().strip(), []).append(m)
 
-        for key, group in groups.items():
+        for group in groups.values():
             if len(group) < 2:
                 continue
 
-            # Keep the best one: highest importance + longest text
-            group.sort(key=lambda x: (x.importance, len(x.fact)), reverse=True)
-            keeper = group[0]
-            to_merge = group[1:]
+            group.sort(key=lambda x: (x.importance or 0, len(x.fact)), reverse=True)
+            keeper, duplicates = group[0], group[1:]
 
-            for dup in to_merge:
+            for dup in duplicates:
                 merged += 1
-                merged_details.append({
-                    "kept": keeper.fact[:80],
-                    "removed": dup.fact[:80],
-                    "kept_id": keeper.id,
-                    "removed_id": dup.id,
-                })
+                merged_details.append(
+                    {
+                        "kept": keeper.fact[:80],
+                        "removed": dup.fact[:80],
+                        "kept_id": keeper.id,
+                        "removed_id": dup.id,
+                    }
+                )
 
-                if not dry_run:
-                    # Roll up stats to keeper
-                    keeper.access_count += dup.access_count
-                    keeper.importance = max(keeper.importance, dup.importance)
-                    keeper.confidence = max(keeper.confidence, dup.confidence)
-                    if len(dup.fact) > len(keeper.fact):
-                        keeper.fact = dup.fact  # Keep longer version
-                    keeper.tags = list(set(keeper.tags + dup.tags))  # Merge tags
+                if dry_run:
+                    continue
+
+                keeper.access_count = (keeper.access_count or 0) + (dup.access_count or 0)
+                keeper.importance = max(keeper.importance or 0, dup.importance or 0)
+                keeper.confidence = max(keeper.confidence or 0.0, dup.confidence or 0.0)
+                if len(dup.fact) > len(keeper.fact):
+                    keeper.fact = dup.fact
+                # set() over both sides: `keeper.tags + dup.tags` raised
+                # TypeError whenever either column was NULL.
+                keeper.tags = sorted(set(keeper.tags or []) | set(dup.tags or []))
+                if dup.last_accessed and keeper.last_accessed:
                     keeper.last_accessed = max(keeper.last_accessed, dup.last_accessed)
 
-                    # Delete duplicate
-                    session.delete(dup)
+                doomed.append((dup.id, dup.wiki_path))
+                session.delete(dup)
 
-        if not dry_run:
-            session.commit()
+    for memory_id, wiki_path in doomed:
+        _purge_memory_artifacts(memory_id, wiki_path)
 
-        return {
-            "merged": merged if not dry_run else 0,
-            "dry_run": dry_run,
-            "candidates": merged,
-            "details": merged_details[:10],
-        }
-    finally:
-        session.close()
+    if not dry_run and merged:
+        from .store import reindex_keywords
+
+        reindex_keywords()
+
+    return {
+        "merged": merged if not dry_run else 0,
+        "dry_run": dry_run,
+        "candidates": merged,
+        "details": merged_details[:10],
+    }
 
 
 def decay_importance() -> dict:
-    """Decay confidence of auto-extracted facts that haven't been reinforced.
-    
-    Applies confidence *= 0.98^(days_since_last_access) for facts with
-    source != 'manual' and importance > 2. Prevents stale facts from
-    persisting at inflated confidence levels.
-    
-    Returns summary of decay operations.
+    """Decay confidence of auto-extracted facts that go unreinforced.
+
+    ``confidence *= rate ** days_since_last_access`` for non-manual facts.
     """
-    session = get_session()
-    try:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)  # naive for DB compat
+    rate = config.confidence_decay_rate
+    now = datetime.now(UTC)
+    decayed = 0
+    lowest = 1.0
+
+    with session_scope() as session:
         candidates = (
-            session.query(MemoryFact)
-            .filter(
-                MemoryFact.source != "manual",
-                MemoryFact.confidence > 0.1,
-            )
-            .all()
+            session.query(MemoryFact).filter(MemoryFact.source != "manual", MemoryFact.confidence > 0.1).all()
         )
-        decayed = 0
-        lowest = 1.0
         for mem in candidates:
+            if not mem.last_accessed:
+                continue
             days = (now - mem.last_accessed).days
             if days <= 1:
                 continue
-            factor = 0.98 ** days
-            new_conf = round(mem.confidence * factor, 4)
-            if new_conf >= mem.confidence:
+            new_conf = round((mem.confidence or 1.0) * (rate**days), 4)
+            if new_conf >= (mem.confidence or 1.0):
                 continue
             mem.confidence = max(new_conf, 0.1)
             decayed += 1
             lowest = min(lowest, mem.confidence)
-        session.commit()
-        return {"decayed_facts": decayed, "lowest_confidence": round(lowest, 4)}
-    finally:
-        session.close()
 
-
-def _remove_from_rag_if_exists(text_snippet: str):
-    """Remove associated RAG entries if a memory was also indexed there."""
-    try:
-        from ..rag.engine import engine
-        # Search for chunks matching this text
-        results = engine.search(text_snippet, limit=2)
-        for r in results:
-            if r.get("source", "").startswith("memory:"):
-                engine.delete_source(r["source"])
-    except Exception:
-        pass  # RAG engine might not be initialized
+    return {"decayed_facts": decayed, "lowest_confidence": round(lowest, 4)}
 
 
 def run_pipeline(dry_run: bool = False) -> dict:
-    """Run the full pruning pipeline.
-
-    Steps:
-      0. Decay confidence of unaccessed auto-extracted facts
-      1. Remove expired memories
-      2. Merge exact/close text duplicates
-      3. Prune low-importance, stale memories
-      4. Return summary
-
-    Args:
-        dry_run: If True, only report what would be done (no modifications)
-    """
+    """Decay confidence, drop expired, merge duplicates, prune stale."""
     decayed = decay_importance()
-    expired = prune_expired()
-    duplicates = merge_duplicates(similarity_check=False, dry_run=dry_run)
+    expired = 0 if dry_run else prune_expired()
+    duplicates = merge_duplicates(dry_run=dry_run)
     low_imp = prune_low_importance(dry_run=dry_run)
 
     return {
