@@ -32,7 +32,7 @@ jobs:
           # The test suite stubs out the vector layer, so the heavy optional
           # stack (torch, chromadb) is not needed to run it.
           pip install -e . --no-deps
-          pip install pytest ruff fastapi "pydantic-settings>=2" sqlalchemy httpx "mcp>=1.9" uvicorn
+          pip install pytest ruff numpy fastapi "pydantic-settings>=2" sqlalchemy httpx "mcp>=1.9" uvicorn
 
       - name: Lint
         run: ruff check .

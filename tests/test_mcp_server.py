@@ -5,6 +5,12 @@ from __future__ import annotations
 import asyncio
 
 
+def _schema(tool):
+    """Tool schema attribute. The SDK renamed ``inputSchema`` in mcp 2.0."""
+    schema = getattr(tool, "inputSchema", None)
+    return tool.input_schema if schema is None else schema
+
+
 def test_module_imports_and_exposes_tools():
     from amnis.server.mcp import server
 
@@ -32,7 +38,7 @@ def test_schemas_are_valid_json():
     from amnis.server.mcp import server
 
     for tool in asyncio.run(server.list_tools()):
-        json.dumps(tool.inputSchema)
+        json.dumps(_schema(tool))
         assert tool.description, f"{tool.name} has no description"
 
 
@@ -40,7 +46,7 @@ def test_prune_default_is_a_real_boolean():
     from amnis.server.mcp import server
 
     tools = {t.name: t for t in asyncio.run(server.list_tools())}
-    schema = tools["amnis_prune_memory"].inputSchema
+    schema = _schema(tools["amnis_prune_memory"])
     assert schema["properties"]["dry_run"]["default"] is False
 
 
